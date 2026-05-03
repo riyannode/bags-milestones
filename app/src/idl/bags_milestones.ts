@@ -464,7 +464,12 @@ export type BagsMilestones = {
           "writable": true
         },
         {
-          "name": "tokenMint"
+          "name": "tokenMint",
+          "docs": [
+            "Must be the same mint the vault is governing — otherwise a voter",
+            "could pass any SPL token they hold a large balance of and inflate",
+            "their vote weight (BUG_pr-review-job-...0001)."
+          ]
         },
         {
           "name": "voterTokenAccount",
@@ -474,6 +479,12 @@ export type BagsMilestones = {
         },
         {
           "name": "voteRecord",
+          "docs": [
+            "Vote record PDA. Seeded by `claim_timestamp` so a fresh PDA is",
+            "allocated per claim round — prevents stale records from a previous",
+            "round blocking re-votes after a `Rejected → Claimed` re-claim",
+            "(BUG_pr-review-job-...0002)."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -489,6 +500,11 @@ export type BagsMilestones = {
               {
                 "kind": "account",
                 "path": "milestone"
+              },
+              {
+                "kind": "account",
+                "path": "milestone.claim_timestamp",
+                "account": "milestone"
               },
               {
                 "kind": "account",

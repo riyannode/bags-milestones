@@ -546,16 +546,29 @@ pub struct Vote<'info> {
     )]
     pub milestone: Account<'info, Milestone>,
 
+    /// Must be the same mint the vault is governing — otherwise a voter
+    /// could pass any SPL token they hold a large balance of and inflate
+    /// their vote weight (BUG_pr-review-job-...0001).
+    #[account(address = vault.token_mint @ BagsError::TokenAccountMintMismatch)]
     pub token_mint: Account<'info, Mint>,
 
     /// Voter's SPL token account for the Bags creator token.
     pub voter_token_account: Account<'info, TokenAccount>,
 
+    /// Vote record PDA. Seeded by `claim_timestamp` so a fresh PDA is
+    /// allocated per claim round — prevents stale records from a previous
+    /// round blocking re-votes after a `Rejected → Claimed` re-claim
+    /// (BUG_pr-review-job-...0002).
     #[account(
         init,
         payer = voter,
         space = VoteRecord::SIZE,
-        seeds = [VOTE_SEED, milestone.key().as_ref(), voter.key().as_ref()],
+        seeds = [
+            VOTE_SEED,
+            milestone.key().as_ref(),
+            &milestone.claim_timestamp.to_le_bytes(),
+            voter.key().as_ref(),
+        ],
         bump,
     )]
     pub vote_record: Account<'info, VoteRecord>,

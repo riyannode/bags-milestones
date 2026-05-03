@@ -63,11 +63,24 @@ describe("bags-milestones", () => {
       program.programId,
     )[0];
 
-  const findVotePda = (milestone: PublicKey, voter: PublicKey) =>
-    PublicKey.findProgramAddressSync(
-      [VOTE_SEED, milestone.toBuffer(), voter.toBuffer()],
+  const findVotePda = (
+    milestone: PublicKey,
+    voter: PublicKey,
+    claimTimestamp: BN,
+  ) => {
+    const tsBuf = Buffer.alloc(8);
+    // Mirror Rust's `i64::to_le_bytes`. BN handles negative numbers via
+    // two's complement which we don't expect on devnet, but support it for
+    // future-proofing the helper.
+    tsBuf.writeBigInt64LE(BigInt(claimTimestamp.toString()));
+    return PublicKey.findProgramAddressSync(
+      [VOTE_SEED, milestone.toBuffer(), tsBuf, voter.toBuffer()],
       program.programId,
     )[0];
+  };
+
+  const fetchClaimTs = async (milestonePda: PublicKey) =>
+    (await program.account.milestone.fetch(milestonePda)).claimTimestamp;
 
   const fund = async (kp: Keypair, sol = 2) => {
     const sig = await connection.requestAirdrop(kp.publicKey, sol * LAMPORTS_PER_SOL);
@@ -365,6 +378,7 @@ describe("bags-milestones", () => {
         } as never)
         .signers([creator])
         .rpc();
+      const claimTs = await fetchClaimTs(milestonePda);
 
       const ataA = await getOrCreateAssociatedTokenAccount(
         connection,
@@ -388,7 +402,7 @@ describe("bags-milestones", () => {
           milestone: milestonePda,
           tokenMint,
           voterTokenAccount: ataA.address,
-          voteRecord: findVotePda(milestonePda, holderA.publicKey),
+          voteRecord: findVotePda(milestonePda, holderA.publicKey, claimTs),
         } as never)
         .signers([holderA])
         .rpc();
@@ -402,7 +416,7 @@ describe("bags-milestones", () => {
           milestone: milestonePda,
           tokenMint,
           voterTokenAccount: ataB.address,
-          voteRecord: findVotePda(milestonePda, holderB.publicKey),
+          voteRecord: findVotePda(milestonePda, holderB.publicKey, claimTs),
         } as never)
         .signers([holderB])
         .rpc();
@@ -422,6 +436,7 @@ describe("bags-milestones", () => {
         } as never)
         .signers([creator])
         .rpc();
+      const claimTs = await fetchClaimTs(milestonePda);
 
       const ataA = await getOrCreateAssociatedTokenAccount(
         connection,
@@ -429,7 +444,7 @@ describe("bags-milestones", () => {
         tokenMint,
         holderA.publicKey,
       );
-      const votePda = findVotePda(milestonePda, holderA.publicKey);
+      const votePda = findVotePda(milestonePda, holderA.publicKey, claimTs);
 
       await program.methods
         .vote(0, true)
@@ -478,6 +493,7 @@ describe("bags-milestones", () => {
         tokenMint,
         nonHolder.publicKey,
       );
+      const claimTs = await fetchClaimTs(milestonePda);
       // Non-holder ATA exists but has zero balance.
       await expectError(
         program.methods
@@ -488,11 +504,100 @@ describe("bags-milestones", () => {
             milestone: milestonePda,
             tokenMint,
             voterTokenAccount: ataNon.address,
-            voteRecord: findVotePda(milestonePda, nonHolder.publicKey),
+            voteRecord: findVotePda(milestonePda, nonHolder.publicKey, claimTs),
           } as never)
           .signers([nonHolder])
           .rpc(),
         "ZeroVoteWeight",
+      );
+    });
+
+    // -----------------------------------------------------------------
+    // Regression: Devin Review BUG_pr-review-...0001
+    // Voting with an arbitrary SPL mint must be rejected by the
+    // `address = vault.token_mint` constraint on `Vote.token_mint`.
+    // -----------------------------------------------------------------
+    it("vote — arbitrary token_mint rejected (BUG-0001 regression)", async () => {
+      await program.methods
+        .claimMilestone(0, "evidence")
+        .accounts({
+          creator: creator.publicKey,
+          vault: vaultPda,
+          milestone: milestonePda,
+        } as never)
+        .signers([creator])
+        .rpc();
+      const claimTs = await fetchClaimTs(milestonePda);
+
+      // Attacker creates an unrelated SPL mint and gives themselves a huge
+      // balance — pre-fix, this could be passed as `token_mint` to inflate
+      // vote weight.
+      const attackerMint = await createMint(
+        connection,
+        payer,
+        creator.publicKey,
+        null,
+        6,
+      );
+      const attackerAta = await getOrCreateAssociatedTokenAccount(
+        connection,
+        payer,
+        attackerMint,
+        nonHolder.publicKey,
+      );
+      await mintTo(
+        connection,
+        payer,
+        attackerMint,
+        attackerAta.address,
+        creator,
+        9_999_999_999n,
+      );
+
+      await expectError(
+        program.methods
+          .vote(0, true)
+          .accounts({
+            voter: nonHolder.publicKey,
+            vault: vaultPda,
+            milestone: milestonePda,
+            tokenMint: attackerMint,
+            voterTokenAccount: attackerAta.address,
+            voteRecord: findVotePda(milestonePda, nonHolder.publicKey, claimTs),
+          } as never)
+          .signers([nonHolder])
+          .rpc(),
+        "TokenAccountMintMismatch",
+      );
+    });
+
+    // -----------------------------------------------------------------
+    // Regression: Devin Review BUG_pr-review-...0002
+    // VoteRecord PDAs must be seeded by `claim_timestamp` so a fresh
+    // PDA is allocated on each `Rejected → Claimed` re-claim. We cannot
+    // exercise the full 72h re-claim cycle inside a unit test, so we
+    // assert the seed-derivation property directly.
+    // -----------------------------------------------------------------
+    it("vote — VoteRecord PDA differs across claim rounds (BUG-0002 regression)", async () => {
+      await program.methods
+        .claimMilestone(0, "evidence")
+        .accounts({
+          creator: creator.publicKey,
+          vault: vaultPda,
+          milestone: milestonePda,
+        } as never)
+        .signers([creator])
+        .rpc();
+      const claimTs1 = await fetchClaimTs(milestonePda);
+
+      const round1Pda = findVotePda(milestonePda, holderA.publicKey, claimTs1);
+      const claimTs2 = claimTs1.add(new BN(1));
+      const round2Pda = findVotePda(milestonePda, holderA.publicKey, claimTs2);
+      assert.notEqual(
+        round1Pda.toBase58(),
+        round2Pda.toBase58(),
+        "VoteRecord PDA must change when claim_timestamp changes — otherwise " +
+          "voters from a rejected round would be locked out of round 2.",
       );
     });
 

@@ -9,7 +9,7 @@
  *   - `RPC_URL`, `PROGRAM_ID`, `EXPLORER_BASE`.
  */
 
-import { AnchorProvider, Program, type Idl } from "@coral-xyz/anchor";
+import { AnchorProvider, BN, Program, type Idl } from "@coral-xyz/anchor";
 import {
   Connection,
   PublicKey,
@@ -99,9 +99,24 @@ export function findMilestonePda(vault: PublicKey, index: number): PublicKey {
   )[0];
 }
 
-export function findVotePda(milestone: PublicKey, voter: PublicKey): PublicKey {
+/**
+ * VoteRecord PDA. Seeded by `claim_timestamp` so a fresh PDA is allocated
+ * per claim round — prevents stale records from a previous round blocking
+ * re-votes after a `Rejected → Claimed` re-claim.
+ *
+ * `claimTimestamp` must be the i64 from the Milestone account at the
+ * moment of the vote (load via `program.account.milestone.fetch`).
+ */
+export function findVotePda(
+  milestone: PublicKey,
+  voter: PublicKey,
+  claimTimestamp: BN,
+): PublicKey {
+  const tsBuf = Buffer.alloc(8);
+  // Mirror Rust's `i64::to_le_bytes`.
+  tsBuf.writeBigInt64LE(BigInt(claimTimestamp.toString()));
   return PublicKey.findProgramAddressSync(
-    [VOTE_SEED, milestone.toBuffer(), voter.toBuffer()],
+    [VOTE_SEED, milestone.toBuffer(), tsBuf, voter.toBuffer()],
     PROGRAM_ID,
   )[0];
 }

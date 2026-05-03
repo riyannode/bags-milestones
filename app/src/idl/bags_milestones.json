@@ -458,7 +458,12 @@
           "writable": true
         },
         {
-          "name": "token_mint"
+          "name": "token_mint",
+          "docs": [
+            "Must be the same mint the vault is governing — otherwise a voter",
+            "could pass any SPL token they hold a large balance of and inflate",
+            "their vote weight (BUG_pr-review-job-...0001)."
+          ]
         },
         {
           "name": "voter_token_account",
@@ -468,6 +473,12 @@
         },
         {
           "name": "vote_record",
+          "docs": [
+            "Vote record PDA. Seeded by `claim_timestamp` so a fresh PDA is",
+            "allocated per claim round — prevents stale records from a previous",
+            "round blocking re-votes after a `Rejected → Claimed` re-claim",
+            "(BUG_pr-review-job-...0002)."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -483,6 +494,11 @@
               {
                 "kind": "account",
                 "path": "milestone"
+              },
+              {
+                "kind": "account",
+                "path": "milestone.claim_timestamp",
+                "account": "Milestone"
               },
               {
                 "kind": "account",
