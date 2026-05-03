@@ -188,7 +188,11 @@ export function useBagsMilestones(): UseBagsMilestonesResult {
     const tokenMint = new PublicKey(mint);
     const vault = findVaultPda(tokenMint);
     const milestone = findMilestonePda(vault, index);
-    const voteRecord = findVotePda(milestone, pk);
+    // VoteRecord PDA depends on the milestone's current `claim_timestamp`
+    // so a fresh PDA is allocated per claim round (regression fix for
+    // BUG_pr-review-...0002 — see programs/bags-milestones/src/lib.rs).
+    const milestoneAcc = await program.account.milestone.fetch(milestone);
+    const voteRecord = findVotePda(milestone, pk, milestoneAcc.claimTimestamp);
     const tx = await program.methods
       .vote(index, approve)
       .accounts({
