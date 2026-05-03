@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { WalletConnect } from "@/components/WalletConnect";
 import { CreatorDashboard } from "@/components/CreatorDashboard";
+import { Logo } from "@/components/Logo";
 
 interface PageProps {
   params: { tokenId: string };
@@ -8,12 +9,18 @@ interface PageProps {
 
 export default function CreatorDashboardPage({ params }: PageProps) {
   return (
-    <main className="mx-auto max-w-4xl px-6 py-10">
+    <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="flex items-center justify-between">
-        <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-200">
-          ← Back
-        </Link>
-        <WalletConnect />
+        <Logo />
+        <div className="flex items-center gap-3">
+          <Link
+            href="/"
+            className="text-sm text-fg-muted hover:text-fg"
+          >
+            ← Back
+          </Link>
+          <WalletConnect />
+        </div>
       </header>
       <CreatorDashboard tokenId={params.tokenId} />
     </main>
