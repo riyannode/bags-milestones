@@ -30,39 +30,47 @@ export function MilestoneCard({
   onClaim,
   onFinalize,
 }: MilestoneCardProps) {
-  const statusStyles: Record<MilestoneView["status"], string> = {
-    pending: "bg-zinc-800 text-zinc-300",
-    claimed: "bg-purple-700 text-purple-50",
-    approved: "bg-emerald-700 text-emerald-50",
-    rejected: "bg-rose-800 text-rose-50",
+  const pillClass: Record<MilestoneView["status"], string> = {
+    pending: "pill-pending",
+    claimed: "pill-claimed",
+    approved: "pill-approved",
+    rejected: "pill-rejected",
   };
 
+  const wrapperClass =
+    milestone.status === "claimed" ? "glass-strong" : "glass";
+
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-5">
+    <div className={`${wrapperClass} relative overflow-hidden rounded-2xl p-5`}>
+      <div className="bg-dotgrid absolute inset-0 -z-10 opacity-30" />
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <span>Milestone #{milestone.index + 1}</span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-fg-muted">
+            <span>M-{(milestone.index + 1).toString().padStart(2, "0")}</span>
             <span>·</span>
-            <span>Deadline {formatDeadline(milestone.deadline)}</span>
+            <span>{formatDeadline(milestone.deadline)}</span>
           </div>
-          <h2 className="mt-1 text-lg font-semibold text-zinc-100">
+          <h2 className="mt-1.5 truncate text-lg font-semibold tracking-tight text-fg">
             {milestone.title}
           </h2>
-          <p className="mt-1 text-sm text-zinc-400">{milestone.description}</p>
+          {milestone.description && (
+            <p className="mt-1 text-sm text-fg-muted">
+              {milestone.description}
+            </p>
+          )}
         </div>
         <span
-          className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[milestone.status]}`}
+          className={`shrink-0 rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] ${pillClass[milestone.status]}`}
         >
           {milestone.status}
         </span>
       </div>
 
-      <div className="mt-4 flex items-baseline justify-between">
-        <span className="text-xs uppercase tracking-wider text-zinc-500">
+      <div className="mt-4 flex items-baseline justify-between border-t border-border pt-4">
+        <span className="text-[10px] uppercase tracking-[0.2em] text-fg-muted">
           Locked
         </span>
-        <span className="font-mono text-lg text-zinc-100">
+        <span className="font-mono text-xl text-fg">
           {formatSol(milestone.amountLocked)}
         </span>
       </div>
@@ -73,7 +81,7 @@ export function MilestoneCard({
             href={milestone.evidenceUrl}
             target="_blank"
             rel="noreferrer"
-            className="text-purple-400 hover:text-purple-300 break-all"
+            className="break-all text-primary hover:underline"
           >
             evidence ↗
           </a>
@@ -93,7 +101,7 @@ export function MilestoneCard({
             <button
               onClick={onFinalize}
               disabled={isFinalizing}
-              className="mt-3 w-full rounded-lg bg-zinc-800 py-2 text-sm text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
+              className="btn-ghost mt-3 w-full rounded-lg py-2 text-sm"
             >
               {isFinalizing ? "Finalizing…" : "Finalize milestone"}
             </button>
@@ -131,12 +139,12 @@ function ClaimForm({
         type="url"
         required
         placeholder="Evidence URL (Twitter, GitHub, demo video…)"
-        className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-purple-500 focus:outline-none"
+        className="flex-1 rounded-lg border border-border bg-white/[0.02] px-3 py-2 text-sm text-fg placeholder:text-fg-muted/60 focus:border-primary/40 focus:outline-none"
       />
       <button
         type="submit"
         disabled={isClaiming}
-        className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+        className="btn-primary rounded-lg px-3 py-2 text-sm font-medium"
       >
         {isClaiming ? "Claiming…" : "Claim done"}
       </button>

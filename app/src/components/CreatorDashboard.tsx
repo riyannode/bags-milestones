@@ -71,7 +71,7 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
 
   if (!walletAddress) {
     return (
-      <div className="mt-12 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-6 text-center text-zinc-400">
+      <div className="glass mt-12 rounded-2xl p-6 text-center text-fg-muted">
         Connect your wallet to manage milestones for this token.
       </div>
     );
@@ -79,68 +79,91 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
 
   return (
     <div className="mt-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Creator dashboard
-          </h1>
-          <p className="text-sm text-zinc-500 font-mono">
-            {shortAddr(tokenId, 6, 6)}
-          </p>
+      {/* Header card */}
+      <div className="glass relative overflow-hidden rounded-2xl p-6">
+        <div className="bg-dotgrid absolute inset-0 -z-10 opacity-30" />
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-fg-muted">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary shadow-glow-soft" />
+              Creator dashboard
+            </div>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+              Manage milestones
+            </h1>
+            <p className="font-mono text-xs text-fg-muted">
+              {shortAddr(tokenId, 6, 6)}
+            </p>
+          </div>
+          {!vault && (
+            <button
+              disabled={busy !== null}
+              onClick={() => wrap("init", () => initializeVault(tokenId))}
+              className="btn-primary rounded-lg px-4 py-2 text-sm font-medium"
+            >
+              {busy === "init" ? "Initializing…" : "Initialize vault"}
+            </button>
+          )}
         </div>
-        {!vault ? (
-          <button
-            disabled={busy !== null}
-            onClick={() => wrap("init", () => initializeVault(tokenId))}
-            className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
-          >
-            {busy === "init" ? "Initializing…" : "Initialize vault"}
-          </button>
-        ) : null}
       </div>
 
       {!vault ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-6 text-zinc-400">
+        <div className="glass rounded-2xl p-6 text-fg-muted">
           No vault exists for this token yet. Initialize one to start
           committing milestones.
         </div>
       ) : (
         <>
           {!isCreator && (
-            <div className="rounded-2xl border border-amber-700/40 bg-amber-950/20 p-4 text-sm text-amber-200">
+            <div
+              className="rounded-2xl p-4 text-sm"
+              style={{
+                background: "rgba(245,158,11,0.08)",
+                border: "1px solid rgba(245,158,11,0.3)",
+                color: "#fde68a",
+              }}
+            >
               Connected wallet ({shortAddr(walletAddress)}) is not the creator
               of this vault ({shortAddr(vault.creator)}). Read-only.
             </div>
           )}
 
-          <EscrowBalance
-            totalLamports={vault.escrowBalance}
-            milestones={milestones}
-          />
-
-          {isCreator && (
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-5">
-              <h3 className="text-sm uppercase tracking-wider text-zinc-400">
-                Royalties
-              </h3>
-              <div className="mt-2 flex items-center justify-between">
-                <div className="text-zinc-300">
-                  Pending royalties on Bags:{" "}
-                  <span className="font-mono">
+          {/* Bento: escrow + royalty deposit */}
+          <div className="grid gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <EscrowBalance
+                totalLamports={vault.escrowBalance}
+                milestones={milestones}
+              />
+            </div>
+            {isCreator && (
+              <div className="glass relative overflow-hidden rounded-2xl p-5">
+                <div className="bg-dotgrid absolute inset-0 -z-10 opacity-30" />
+                <h3 className="text-[11px] uppercase tracking-[0.2em] text-fg-muted">
+                  Royalties
+                </h3>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="font-mono text-2xl font-semibold text-fg">
                     {formatSol(pendingRoyalties)}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-[0.2em] text-fg-muted">
+                    pending on Bags
                   </span>
                 </div>
                 <DepositForm
                   busy={busy === "deposit"}
                   onDeposit={(sol) =>
                     wrap("deposit", () =>
-                      depositRoyalty(tokenId, Math.floor(sol * LAMPORTS_PER_SOL)),
+                      depositRoyalty(
+                        tokenId,
+                        Math.floor(sol * LAMPORTS_PER_SOL),
+                      ),
                     )
                   }
                 />
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {isCreator && (
             <NewMilestoneForm
@@ -162,49 +185,76 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
           )}
 
           <div className="space-y-4">
-            {milestones.map((m) => (
-              <MilestoneCard
-                key={m.index}
-                milestone={m}
-                userTokenBalance={0}
-                hasVoted={false}
-                isCreator={Boolean(isCreator)}
-                isVoting={false}
-                isClaiming={busy === `claim-${m.index}`}
-                isFinalizing={busy === `finalize-${m.index}`}
-                onVote={() => Promise.resolve()}
-                onClaim={(url) =>
-                  wrap(`claim-${m.index}`, () =>
-                    claimMilestone(tokenId, m.index, url),
-                  )
-                }
-                onFinalize={() =>
-                  wrap(`finalize-${m.index}`, () =>
-                    finalizeMilestone(tokenId, m.index, vault.creator),
-                  )
-                }
-              />
-            ))}
+            <h2 className="text-[11px] uppercase tracking-[0.2em] text-fg-muted">
+              Milestones · {milestones.length}
+            </h2>
+            {milestones.length === 0 ? (
+              <div className="glass rounded-2xl p-5 text-sm text-fg-muted">
+                No milestones committed yet.
+              </div>
+            ) : (
+              milestones.map((m) => (
+                <MilestoneCard
+                  key={m.index}
+                  milestone={m}
+                  userTokenBalance={0}
+                  hasVoted={false}
+                  isCreator={Boolean(isCreator)}
+                  isVoting={false}
+                  isClaiming={busy === `claim-${m.index}`}
+                  isFinalizing={busy === `finalize-${m.index}`}
+                  onVote={() => Promise.resolve()}
+                  onClaim={(url) =>
+                    wrap(`claim-${m.index}`, () =>
+                      claimMilestone(tokenId, m.index, url),
+                    )
+                  }
+                  onFinalize={() =>
+                    wrap(`finalize-${m.index}`, () =>
+                      finalizeMilestone(tokenId, m.index, vault.creator),
+                    )
+                  }
+                />
+              ))
+            )}
           </div>
         </>
       )}
 
       {lastTx && (
-        <div className="rounded-lg border border-emerald-700/40 bg-emerald-950/30 p-3 text-xs text-emerald-200">
-          tx{" "}
+        <div
+          className="flex items-center justify-between rounded-xl px-4 py-3 text-xs"
+          style={{
+            background: "rgba(71,255,96,0.08)",
+            border: "1px solid rgba(71,255,96,0.3)",
+            boxShadow: "0 0 18px rgba(71,255,96,0.15)",
+          }}
+        >
+          <span className="font-mono uppercase tracking-[0.2em] text-success">
+            Tx submitted
+          </span>
           <a
-            className="underline hover:text-emerald-100"
+            className="font-mono text-success hover:underline"
             href={explorerUrl(lastTx)}
             target="_blank"
             rel="noreferrer"
           >
-            {shortAddr(lastTx, 8, 8)}
+            {shortAddr(lastTx, 8, 8)} ↗
           </a>
         </div>
       )}
       {error && (
-        <div className="rounded-lg border border-rose-700/40 bg-rose-950/30 p-3 text-xs text-rose-200 break-all">
-          {error}
+        <div
+          className="rounded-xl px-4 py-3 text-xs"
+          style={{
+            background: "rgba(255,77,77,0.08)",
+            border: "1px solid rgba(255,77,77,0.3)",
+          }}
+        >
+          <div className="mb-1 font-mono uppercase tracking-[0.2em] text-destructive">
+            Error
+          </div>
+          <div className="break-all text-fg/85">{error}</div>
         </div>
       )}
     </div>
@@ -226,7 +276,7 @@ function DepositForm({
         const n = Number(v);
         if (n > 0) onDeposit(n);
       }}
-      className="flex gap-2"
+      className="mt-4 flex gap-2"
     >
       <input
         type="number"
@@ -234,14 +284,14 @@ function DepositForm({
         min="0"
         value={v}
         onChange={(e) => setV(e.target.value)}
-        className="w-28 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500 focus:outline-none"
+        className="w-full rounded-lg border border-border bg-white/[0.02] px-3 py-2 font-mono text-sm text-fg focus:border-primary/40 focus:outline-none"
       />
       <button
         type="submit"
         disabled={busy}
-        className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+        className="btn-primary shrink-0 rounded-lg px-3 py-2 text-sm font-medium"
       >
-        {busy ? "Depositing…" : "Deposit SOL"}
+        {busy ? "Depositing…" : "Deposit"}
       </button>
     </form>
   );
@@ -282,56 +332,60 @@ function NewMilestoneForm({
         setDeadline("");
         setAmount("");
       }}
-      className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-5"
+      className="glass relative overflow-hidden rounded-2xl p-6"
     >
-      <h3 className="text-sm uppercase tracking-wider text-zinc-400">
-        New milestone {nextIndex + 1}/5
-      </h3>
+      <div className="bg-dotgrid absolute inset-0 -z-10 opacity-30" />
+      <div className="flex items-center justify-between">
+        <h3 className="text-[11px] uppercase tracking-[0.2em] text-fg-muted">
+          New milestone · M-{(nextIndex + 1).toString().padStart(2, "0")} / 05
+        </h3>
+        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary/80">
+          {disabled ? "max reached" : "ready"}
+        </span>
+      </div>
       {disabled ? (
-        <p className="mt-3 text-sm text-zinc-500">
+        <p className="mt-3 text-sm text-fg-muted">
           Maximum of 5 milestones reached.
         </p>
       ) : (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             maxLength={64}
             placeholder="Title"
-            className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500 focus:outline-none"
+            className="rounded-lg border border-border bg-white/[0.02] px-3 py-2 text-sm text-fg placeholder:text-fg-muted/60 focus:border-primary/40 focus:outline-none"
           />
           <input
             type="datetime-local"
             value={deadline}
             onChange={(e) => setDeadline(e.target.value)}
-            className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500 focus:outline-none"
+            className="rounded-lg border border-border bg-white/[0.02] px-3 py-2 font-mono text-sm text-fg focus:border-primary/40 focus:outline-none"
           />
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             maxLength={256}
             placeholder="Description"
-            className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500 focus:outline-none sm:col-span-2"
             rows={2}
+            className="rounded-lg border border-border bg-white/[0.02] px-3 py-2 text-sm text-fg placeholder:text-fg-muted/60 focus:border-primary/40 focus:outline-none sm:col-span-2"
           />
-          <div className="flex items-center gap-2 sm:col-span-2">
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="SOL to lock"
-              className="w-40 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500 focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
-            >
-              {busy ? "Saving…" : "Add milestone"}
-            </button>
-          </div>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="Amount (SOL)"
+            className="rounded-lg border border-border bg-white/[0.02] px-3 py-2 font-mono text-sm text-fg placeholder:text-fg-muted/60 focus:border-primary/40 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={busy}
+            className="btn-primary rounded-lg px-3 py-2 text-sm font-medium"
+          >
+            {busy ? "Creating…" : "Add milestone →"}
+          </button>
         </div>
       )}
     </form>

@@ -15,20 +15,23 @@ export function TokenSearchToCreator() {
         if (!v) return;
         router.push(`/creator/${v}`);
       }}
-      className="mx-auto flex max-w-xl items-center gap-2"
+      className="glass mx-auto flex max-w-xl items-center gap-2 rounded-2xl p-2"
     >
+      <span className="hidden select-none px-3 font-mono text-xs uppercase tracking-[0.2em] text-fg-muted sm:inline">
+        ▍ mint
+      </span>
       <input
         type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="Bags token mint address"
-        className="flex-1 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 font-mono text-sm text-zinc-100 placeholder-zinc-500 focus:border-purple-500 focus:outline-none"
+        className="flex-1 rounded-xl bg-transparent px-3 py-3 font-mono text-sm text-fg placeholder:text-fg-muted/60 focus:outline-none"
       />
       <button
         type="submit"
-        className="rounded-xl bg-purple-600 px-4 py-3 text-sm font-medium text-white hover:bg-purple-500"
+        className="btn-primary rounded-xl px-4 py-3 text-sm font-medium"
       >
-        Open dashboard
+        Open dashboard →
       </button>
     </form>
   );

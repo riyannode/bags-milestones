@@ -4,9 +4,159 @@
 
 :root {
   color-scheme: dark;
+
+  /* Bagscrow / Nexus palette */
+  --bg: #0a0a0f;
+  --card: #12121a;
+  --muted: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.08);
+  --fg: #e6e6ea;
+  --fg-muted: rgba(230, 230, 234, 0.6);
+  --primary: #9dff3d;
+  --primary-fg: #0a0a0f;
+  --success: #47ff60;
+  --warning: #f59e0b;
+  --destructive: #ff4d4d;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+  min-height: 100vh;
 }
 
 body {
-  background: linear-gradient(180deg, #09090b 0%, #11111a 60%, #0b0a14 100%);
-  min-height: 100vh;
+  background:
+    radial-gradient(
+      1200px 600px at 50% -10%,
+      rgba(157, 255, 61, 0.08) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 500px at 100% 0%,
+      rgba(71, 255, 96, 0.06) 0%,
+      transparent 60%
+    ),
+    var(--bg);
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Subtle dot grid overlay used by glassy panels */
+.bg-dotgrid {
+  background-image: radial-gradient(
+    rgba(255, 255, 255, 0.05) 1px,
+    transparent 1px
+  );
+  background-size: 14px 14px;
+}
+
+/* Glassy card surface used across dashboards */
+.glass {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.02) 0%,
+      rgba(255, 255, 255, 0) 100%
+    ),
+    var(--card);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+.glass-strong {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(157, 255, 61, 0.06) 0%,
+      rgba(255, 255, 255, 0) 60%
+    ),
+    var(--card);
+  border: 1px solid rgba(157, 255, 61, 0.18);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+/* Primary CTA shape — neon button with glow */
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-fg);
+  box-shadow:
+    0 0 0 1px rgba(157, 255, 61, 0.4),
+    0 0 24px rgba(157, 255, 61, 0.35);
+  transition:
+    transform 120ms ease,
+    box-shadow 200ms ease,
+    filter 120ms ease;
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow:
+    0 0 0 1px rgba(157, 255, 61, 0.55),
+    0 0 36px rgba(157, 255, 61, 0.5);
+  transform: translateY(-1px);
+}
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.96);
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  transition: background 160ms ease, border-color 160ms ease;
+}
+.btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* Status pill tokens */
+.pill-pending {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.pill-claimed {
+  background: rgba(157, 255, 61, 0.1);
+  color: var(--primary);
+  border: 1px solid rgba(157, 255, 61, 0.3);
+  box-shadow: 0 0 18px rgba(157, 255, 61, 0.18);
+}
+.pill-approved {
+  background: rgba(71, 255, 96, 0.12);
+  color: #5dffb1;
+  border: 1px solid rgba(71, 255, 96, 0.3);
+}
+.pill-rejected {
+  background: rgba(255, 77, 77, 0.12);
+  color: #ff8a8a;
+  border: 1px solid rgba(255, 77, 77, 0.3);
+}
+
+/* Subtle terminal cursor caret used on hero */
+.caret::after {
+  content: "▍";
+  margin-left: 4px;
+  color: var(--primary);
+  animation: blink 1s steps(2, start) infinite;
+}
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-twinkle,
+  .animate-pulse-glow,
+  .caret::after {
+    animation: none !important;
+  }
 }
