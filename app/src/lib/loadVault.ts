@@ -1,0 +1,85 @@
+/**
+ * Helper that pulls a vault + all its milestones from the program in one
+ * shot. Used by both the creator dashboard and the holder view. Returns
+ * `null` if the vault doesn't exist yet.
+ */
+
+import { PublicKey } from "@solana/web3.js";
+import {
+  findMilestonePda,
+  findVaultPda,
+  getConnection,
+  getProgram,
+} from "./anchor";
+import type { MilestoneStatus, MilestoneView, VaultView } from "@/types";
+
+interface LoadResult {
+  vault: VaultView;
+  milestones: MilestoneView[];
+}
+
+interface OnChainStatus {
+  pending?: Record<string, never>;
+  claimed?: Record<string, never>;
+  approved?: Record<string, never>;
+  rejected?: Record<string, never>;
+}
+
+function decodeStatus(s: OnChainStatus): MilestoneStatus {
+  if (s.claimed) return "claimed";
+  if (s.approved) return "approved";
+  if (s.rejected) return "rejected";
+  return "pending";
+}
+
+export async function loadVault(mint: string): Promise<LoadResult | null> {
+  const connection = getConnection();
+  const program = getProgram(connection, undefined);
+  const tokenMint = new PublicKey(mint);
+  const vaultPda = findVaultPda(tokenMint);
+
+  let vaultAcc: Awaited<
+    ReturnType<typeof program.account.milestoneVault.fetchNullable>
+  >;
+  try {
+    vaultAcc = await program.account.milestoneVault.fetchNullable(vaultPda);
+  } catch {
+    return null;
+  }
+  if (!vaultAcc) return null;
+
+  const vault: VaultView = {
+    vault: vaultPda.toBase58(),
+    creator: vaultAcc.creator.toBase58(),
+    tokenMint: vaultAcc.tokenMint.toBase58(),
+    escrowBalance: vaultAcc.escrowBalance.toNumber(),
+    milestoneCount: vaultAcc.milestoneCount,
+  };
+
+  const milestonePdas = Array.from(
+    { length: Math.max(vaultAcc.milestoneCount, 0) },
+    (_, i) => findMilestonePda(vaultPda, i),
+  );
+
+  const accs = await program.account.milestone.fetchMultiple(milestonePdas);
+  const milestones: MilestoneView[] = [];
+  for (let i = 0; i < accs.length; i++) {
+    const m = accs[i];
+    if (!m) continue;
+    milestones.push({
+      index: m.index,
+      title: m.title,
+      description: m.description,
+      deadline: m.deadline.toNumber(),
+      amountLocked: m.amountLocked.toNumber(),
+      status: decodeStatus(m.status as unknown as OnChainStatus),
+      votesApprove: m.votesApprove.toNumber(),
+      votesReject: m.votesReject.toNumber(),
+      votingEnds: m.votingEnds.toNumber(),
+      evidenceUrl: m.evidenceUrl,
+      snapshotSlot: m.snapshotSlot.toNumber(),
+    });
+  }
+
+  return { vault, milestones };
+}
