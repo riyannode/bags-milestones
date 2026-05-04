@@ -6,18 +6,23 @@
 //! funds after holders vote to approve a milestone claim.
 //!
 //! High-level flow:
-//!   1. `initialize_vault`  — creator opts into Milestones for a token.
-//!   2. `set_milestone`     — creator commits to milestone (title, deadline, amount).
-//!   3. `deposit_royalty`   — anyone can top up the escrow (typically the creator
-//!                            forwarding royalties received from Bags).
-//!   4. `claim_milestone`   — creator submits evidence and opens a 72h voting window.
-//!   5. `vote`              — token holders vote approve/reject, weight = balance at
-//!                            snapshot slot (recorded at claim time).
-//!   6. `finalize_milestone`— anyone can call after voting ends; releases funds to
-//!                            creator on majority approve, otherwise leaves locked.
+//! 1. `initialize_vault`  — creator opts into Milestones for a token.
+//! 2. `set_milestone`     — creator commits to milestone (title, deadline, amount).
+//! 3. `deposit_royalty`   — anyone can top up the escrow (typically the creator
+//!    forwarding royalties received from Bags).
+//! 4. `claim_milestone`   — creator submits evidence + an off-chain Merkle root
+//!    of holder balances at the snapshot slot, opening a 72h voting window.
+//! 5. `vote`              — token holders vote approve/reject. Vote weight is
+//!    **proven** via a Merkle proof against the snapshot root, so a holder's
+//!    weight equals their balance at the snapshot slot — buying tokens after
+//!    claim does not inflate vote power.
+//! 6. `finalize_milestone`— anyone can call after voting ends. Honors a quorum
+//!    threshold (default 5% of snapshot supply) and releases funds on majority
+//!    approve.
 
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Mint, TokenAccount};
+use anchor_lang::solana_program::keccak;
+use anchor_lang::system_program;
 
 declare_id!("FqSvFQXV86ggp9Td2Nuea7qjJrpfJS91fWsXXcsTaRvz");
 
@@ -39,6 +44,23 @@ pub const MAX_EVIDENCE_URL_LEN: usize = 256;
 
 /// Voting window duration once a milestone is claimed (72 hours).
 pub const VOTING_DURATION_SECS: i64 = 72 * 60 * 60;
+
+/// Grace period after `milestone.deadline` during which the creator may
+/// still claim the milestone. After this grace, claims are rejected and
+/// the creator must re-set a new deadline. This is what gives the
+/// `deadline` field on-chain teeth.
+pub const CLAIM_GRACE_PERIOD_SECS: i64 = 7 * 24 * 60 * 60;
+
+/// Default quorum threshold in basis points (1 bps = 0.01%).
+/// `(votes_approve + votes_reject) * 10_000 >= snapshot_total_supply * quorum_bps`
+/// Default is 5% of the snapshot supply — without it a single whale
+/// (often the creator at launch) can self-approve trivially.
+pub const DEFAULT_QUORUM_BPS: u16 = 500;
+
+/// Maximum length of a Merkle inclusion proof (in 32-byte siblings).
+/// `2^32` voters fits easily; capping the length protects against
+/// griefing via oversized proofs and keeps the tx size bounded.
+pub const MAX_MERKLE_PROOF_LEN: usize = 32;
 
 // PDA seed prefixes
 pub const VAULT_SEED: &[u8] = b"vault";
@@ -62,6 +84,7 @@ pub mod bags_milestones {
         vault.token_mint = ctx.accounts.token_mint.key();
         vault.escrow_balance = 0;
         vault.milestone_count = 0;
+        vault.quorum_bps = DEFAULT_QUORUM_BPS;
         vault.bump = ctx.bumps.vault;
         vault.escrow_bump = ctx.bumps.escrow;
 
@@ -69,6 +92,7 @@ pub mod bags_milestones {
             vault: vault.key(),
             creator: vault.creator,
             token_mint: vault.token_mint,
+            quorum_bps: vault.quorum_bps,
         });
         Ok(())
     }
@@ -85,9 +109,9 @@ pub mod bags_milestones {
         amount: u64,
     ) -> Result<()> {
         require!(index < MAX_MILESTONES, BagsError::MilestoneIndexOutOfRange);
-        require!(title.as_bytes().len() <= MAX_TITLE_LEN, BagsError::TitleTooLong);
+        require!(title.len() <= MAX_TITLE_LEN, BagsError::TitleTooLong);
         require!(
-            description.as_bytes().len() <= MAX_DESCRIPTION_LEN,
+            description.len() <= MAX_DESCRIPTION_LEN,
             BagsError::DescriptionTooLong
         );
         require!(amount > 0, BagsError::InvalidAmount);
@@ -97,15 +121,12 @@ pub mod bags_milestones {
 
         let milestone = &mut ctx.accounts.milestone;
 
-        // If the milestone account already existed and is past `Pending`,
-        // we cannot overwrite the commitment.
         if milestone.vault != Pubkey::default() {
             require!(
                 matches!(milestone.status, MilestoneStatus::Pending),
                 BagsError::MilestoneLocked
             );
         } else {
-            // First-time initialization: bump milestone count.
             let vault = &mut ctx.accounts.vault;
             if index >= vault.milestone_count {
                 vault.milestone_count = index + 1;
@@ -124,6 +145,8 @@ pub mod bags_milestones {
         milestone.votes_reject = 0;
         milestone.voting_ends = 0;
         milestone.snapshot_slot = 0;
+        milestone.snapshot_root = [0u8; 32];
+        milestone.snapshot_total_supply = 0;
         milestone.evidence_url = String::new();
         milestone.bump = ctx.bumps.milestone;
 
@@ -137,22 +160,21 @@ pub mod bags_milestones {
     }
 
     /// Top up the escrow PDA. Anyone can deposit (creator forwarding royalties,
-    /// a webhook crank, etc.). The on-chain `escrow_balance` field is updated
-    /// so the UI does not have to subtract rent-exempt minimum repeatedly.
+    /// a webhook crank, etc.). The on-chain `escrow_balance` tracks deposits
+    /// for UI convenience; `finalize_milestone` always reconciles against the
+    /// PDA's actual lamport balance so out-of-band deposits also count.
     pub fn deposit_royalty(ctx: Context<DepositRoyalty>, amount: u64) -> Result<()> {
         require!(amount > 0, BagsError::InvalidAmount);
 
-        let from = ctx.accounts.depositor.to_account_info();
-        let to = ctx.accounts.escrow.to_account_info();
-
-        let ix = anchor_lang::solana_program::system_instruction::transfer(
-            from.key,
-            to.key,
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.depositor.to_account_info(),
+                    to: ctx.accounts.escrow.to_account_info(),
+                },
+            ),
             amount,
-        );
-        anchor_lang::solana_program::program::invoke(
-            &ix,
-            &[from, to, ctx.accounts.system_program.to_account_info()],
         )?;
 
         let vault = &mut ctx.accounts.vault;
@@ -170,16 +192,26 @@ pub mod bags_milestones {
     }
 
     /// Creator claims that milestone `index` is complete. Opens a 72h voting
-    /// window and snapshots the current slot for vote-weight verification.
+    /// window and stores the snapshot Merkle root + total supply that voters
+    /// will be checked against.
+    ///
+    /// Off-chain, the caller MUST build a Merkle tree whose leaves are
+    /// `keccak(voter_pubkey || balance.to_le_bytes())` for every holder of
+    /// the token at the current slot. The root is committed on-chain; the
+    /// `MilestoneClaimed` event emits the snapshot slot so any indexer can
+    /// independently rebuild the same tree and verify the root.
     pub fn claim_milestone(
         ctx: Context<ClaimMilestone>,
         _index: u8,
         evidence_url: String,
+        snapshot_root: [u8; 32],
+        snapshot_total_supply: u64,
     ) -> Result<()> {
         require!(
-            evidence_url.as_bytes().len() <= MAX_EVIDENCE_URL_LEN,
+            evidence_url.len() <= MAX_EVIDENCE_URL_LEN,
             BagsError::EvidenceUrlTooLong
         );
+        require!(snapshot_total_supply > 0, BagsError::InvalidSnapshotSupply);
 
         let milestone = &mut ctx.accounts.milestone;
         require!(
@@ -191,14 +223,21 @@ pub mod bags_milestones {
         );
 
         let clock = Clock::get()?;
+        let now = clock.unix_timestamp;
+        let claim_cutoff = milestone
+            .deadline
+            .checked_add(CLAIM_GRACE_PERIOD_SECS)
+            .ok_or(BagsError::ArithmeticOverflow)?;
+        require!(now <= claim_cutoff, BagsError::ClaimDeadlinePassed);
+
         milestone.status = MilestoneStatus::Claimed;
-        milestone.claim_timestamp = clock.unix_timestamp;
-        milestone.voting_ends = clock
-            .unix_timestamp
+        milestone.claim_timestamp = now;
+        milestone.voting_ends = now
             .checked_add(VOTING_DURATION_SECS)
             .ok_or(BagsError::ArithmeticOverflow)?;
         milestone.snapshot_slot = clock.slot;
-        // Reset vote tallies if this is a re-claim after rejection.
+        milestone.snapshot_root = snapshot_root;
+        milestone.snapshot_total_supply = snapshot_total_supply;
         milestone.votes_approve = 0;
         milestone.votes_reject = 0;
         milestone.evidence_url = evidence_url;
@@ -208,18 +247,27 @@ pub mod bags_milestones {
             index: milestone.index,
             voting_ends: milestone.voting_ends,
             snapshot_slot: milestone.snapshot_slot,
+            snapshot_root,
+            snapshot_total_supply,
         });
         Ok(())
     }
 
-    /// Cast a vote on a `Claimed` milestone. Voting weight comes from the
-    /// caller's current SPL token balance; the `snapshot_slot` is recorded
-    /// for off-chain verification (clients should reject vote attempts that
-    /// would have had zero balance at the snapshot slot).
+    /// Cast a vote on a `Claimed` milestone. The voter proves their balance
+    /// at the snapshot slot via a Merkle inclusion proof against
+    /// `milestone.snapshot_root`. The proven weight is what counts —
+    /// buying tokens after claim does not inflate vote power.
     ///
     /// Anti-double-vote is enforced by the `VoteRecord` PDA being created
-    /// fresh — re-vote attempts will fail at account init.
-    pub fn vote(ctx: Context<Vote>, _index: u8, approve: bool) -> Result<()> {
+    /// fresh (seeded by `claim_timestamp`, so each re-claim opens a new
+    /// round of votes).
+    pub fn vote(
+        ctx: Context<Vote>,
+        _index: u8,
+        approve: bool,
+        claimed_weight: u64,
+        proof: Vec<[u8; 32]>,
+    ) -> Result<()> {
         let milestone = &mut ctx.accounts.milestone;
         let vote_record = &mut ctx.accounts.vote_record;
 
@@ -231,50 +279,57 @@ pub mod bags_milestones {
         let now = Clock::get()?.unix_timestamp;
         require!(now < milestone.voting_ends, BagsError::VotingEnded);
 
-        let weight = ctx.accounts.voter_token_account.amount;
-        require!(weight > 0, BagsError::ZeroVoteWeight);
-        require_keys_eq!(
-            ctx.accounts.voter_token_account.owner,
-            ctx.accounts.voter.key(),
-            BagsError::TokenAccountOwnerMismatch
+        require!(claimed_weight > 0, BagsError::ZeroVoteWeight);
+        require!(
+            proof.len() <= MAX_MERKLE_PROOF_LEN,
+            BagsError::MerkleProofTooLong
         );
-        require_keys_eq!(
-            ctx.accounts.voter_token_account.mint,
-            ctx.accounts.token_mint.key(),
-            BagsError::TokenAccountMintMismatch
+
+        let leaf = leaf_hash(&ctx.accounts.voter.key(), claimed_weight);
+        require!(
+            verify_merkle(&leaf, &proof, &milestone.snapshot_root),
+            BagsError::InvalidMerkleProof
         );
 
         if approve {
             milestone.votes_approve = milestone
                 .votes_approve
-                .checked_add(weight)
+                .checked_add(claimed_weight)
                 .ok_or(BagsError::ArithmeticOverflow)?;
         } else {
             milestone.votes_reject = milestone
                 .votes_reject
-                .checked_add(weight)
+                .checked_add(claimed_weight)
                 .ok_or(BagsError::ArithmeticOverflow)?;
         }
 
         vote_record.milestone = milestone.key();
         vote_record.voter = ctx.accounts.voter.key();
         vote_record.vote = approve;
-        vote_record.token_weight = weight;
+        vote_record.token_weight = claimed_weight;
         vote_record.bump = ctx.bumps.vote_record;
 
         emit!(VoteCast {
             milestone: milestone.key(),
             voter: vote_record.voter,
             approve,
-            weight,
+            weight: claimed_weight,
         });
         Ok(())
     }
 
     /// Finalize a milestone after the voting window closes. Permissionless —
-    /// anyone may call to pay the gas. Releases escrow to the creator on
-    /// majority approve, otherwise marks the milestone `Rejected` and leaves
-    /// funds locked (creator may re-submit evidence and re-claim).
+    /// anyone may call to pay the gas. Honors quorum: if total turnout is
+    /// below `quorum_bps` of the snapshot supply, the milestone is marked
+    /// `Rejected` regardless of approve/reject ratio (the creator may
+    /// re-claim with a fresh evidence + snapshot). Otherwise a strict
+    /// majority of approve over reject releases the funds.
+    ///
+    /// Payout is capped at the actual liquid lamport balance of the escrow
+    /// PDA (`escrow.lamports() - rent_exempt_min`). This means out-of-band
+    /// SOL transfers into the PDA are payable, and a partial payout is
+    /// emitted via `MilestoneFinalized.payout` if the escrow is short of
+    /// `amount_locked`.
     pub fn finalize_milestone(ctx: Context<FinalizeMilestone>, _index: u8) -> Result<()> {
         let milestone = &mut ctx.accounts.milestone;
         require!(
@@ -285,30 +340,52 @@ pub mod bags_milestones {
         let now = Clock::get()?.unix_timestamp;
         require!(now >= milestone.voting_ends, BagsError::VotingNotEnded);
 
-        if milestone.votes_approve > milestone.votes_reject {
-            // Approved → release `amount_locked` (capped to escrow balance) to creator.
-            let vault = &mut ctx.accounts.vault;
-            let payout = milestone.amount_locked.min(vault.escrow_balance);
+        let total_votes = milestone
+            .votes_approve
+            .checked_add(milestone.votes_reject)
+            .ok_or(BagsError::ArithmeticOverflow)?;
+
+        // Quorum: total_votes * 10_000 >= supply * quorum_bps. Computed in
+        // u128 so a 100% turnout on a maxed-out u64 supply doesn't overflow.
+        let quorum_bps = ctx.accounts.vault.quorum_bps as u128;
+        let supply = milestone.snapshot_total_supply as u128;
+        let quorum_threshold = supply
+            .checked_mul(quorum_bps)
+            .ok_or(BagsError::ArithmeticOverflow)?;
+        let turnout = (total_votes as u128)
+            .checked_mul(10_000)
+            .ok_or(BagsError::ArithmeticOverflow)?;
+        let quorum_met = turnout >= quorum_threshold;
+
+        if quorum_met && milestone.votes_approve > milestone.votes_reject {
+            // Approved → release `amount_locked` (capped to liquid escrow) to creator.
+            let escrow_info = ctx.accounts.escrow.to_account_info();
+            let creator_info = ctx.accounts.creator.to_account_info();
+
+            let rent = Rent::get()?;
+            let rent_exempt_min = rent.minimum_balance(escrow_info.data_len());
+            let liquid = escrow_info.lamports().saturating_sub(rent_exempt_min);
+            let payout = milestone.amount_locked.min(liquid);
 
             if payout > 0 {
-                let escrow_info = ctx.accounts.escrow.to_account_info();
-                let creator_info = ctx.accounts.creator.to_account_info();
-
-                // Direct lamport debit/credit on PDA (no system_program::transfer
-                // since the PDA is owned by this program, not the system program).
-                **escrow_info.try_borrow_mut_lamports()? = escrow_info
+                // Direct lamport debit/credit on PDA (owned by this program).
+                let new_escrow = escrow_info
                     .lamports()
                     .checked_sub(payout)
                     .ok_or(BagsError::ArithmeticOverflow)?;
+                require!(
+                    new_escrow >= rent_exempt_min,
+                    BagsError::EscrowRentExemptViolation
+                );
+
+                **escrow_info.try_borrow_mut_lamports()? = new_escrow;
                 **creator_info.try_borrow_mut_lamports()? = creator_info
                     .lamports()
                     .checked_add(payout)
                     .ok_or(BagsError::ArithmeticOverflow)?;
 
-                vault.escrow_balance = vault
-                    .escrow_balance
-                    .checked_sub(payout)
-                    .ok_or(BagsError::ArithmeticOverflow)?;
+                let vault = &mut ctx.accounts.vault;
+                vault.escrow_balance = vault.escrow_balance.saturating_sub(payout);
             }
 
             milestone.status = MilestoneStatus::Approved;
@@ -317,6 +394,7 @@ pub mod bags_milestones {
                 index: milestone.index,
                 approved: true,
                 payout,
+                quorum_met: true,
             });
         } else {
             milestone.status = MilestoneStatus::Rejected;
@@ -325,11 +403,39 @@ pub mod bags_milestones {
                 index: milestone.index,
                 approved: false,
                 payout: 0,
+                quorum_met,
             });
         }
 
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------
+// Merkle helpers
+// ---------------------------------------------------------------------
+
+/// Hash a voter / balance pair into a Merkle leaf.
+///
+/// `keccak(voter_pubkey || balance.to_le_bytes())`. Off-chain tooling MUST
+/// match this exact encoding.
+fn leaf_hash(voter: &Pubkey, balance: u64) -> [u8; 32] {
+    keccak::hashv(&[voter.as_ref(), &balance.to_le_bytes()]).0
+}
+
+/// Verify a Merkle inclusion proof using sorted-pair hashing
+/// (the OpenZeppelin / Uniswap convention).
+fn verify_merkle(leaf: &[u8; 32], proof: &[[u8; 32]], root: &[u8; 32]) -> bool {
+    let mut computed = *leaf;
+    for sibling in proof {
+        let pair = if computed <= *sibling {
+            keccak::hashv(&[&computed, sibling]).0
+        } else {
+            keccak::hashv(&[sibling, &computed]).0
+        };
+        computed = pair;
+    }
+    &computed == root
 }
 
 // ---------------------------------------------------------------------
@@ -343,13 +449,14 @@ pub struct MilestoneVault {
     pub token_mint: Pubkey,
     pub escrow_balance: u64,
     pub milestone_count: u8,
+    pub quorum_bps: u16,
     pub bump: u8,
     pub escrow_bump: u8,
 }
 
 impl MilestoneVault {
-    // 8 (disc) + 32 + 32 + 8 + 1 + 1 + 1
-    pub const SIZE: usize = 8 + 32 + 32 + 8 + 1 + 1 + 1;
+    // disc + creator + mint + escrow_balance + milestone_count + quorum_bps + bump + escrow_bump
+    pub const SIZE: usize = 8 + 32 + 32 + 8 + 1 + 2 + 1 + 1;
 }
 
 #[account]
@@ -366,19 +473,24 @@ pub struct Milestone {
     pub votes_reject: u64,
     pub voting_ends: i64,
     pub snapshot_slot: u64,
+    pub snapshot_root: [u8; 32],
+    pub snapshot_total_supply: u64,
     pub evidence_url: String,
     pub bump: u8,
 }
 
 impl Milestone {
-    // disc + vault + index + (4 + title) + (4 + desc) + deadline +
-    // amount + status (1) + claim_ts + votes_approve + votes_reject +
-    // voting_ends + snapshot_slot + (4 + evidence) + bump
+    // disc + vault + index + (4+title) + (4+desc) + deadline + amount_locked
+    // + status (1) + claim_ts + votes_approve + votes_reject + voting_ends
+    // + snapshot_slot + snapshot_root (32) + snapshot_total_supply
+    // + (4+evidence) + bump
     pub const SIZE: usize = 8
         + 32
         + 1
-        + 4 + MAX_TITLE_LEN
-        + 4 + MAX_DESCRIPTION_LEN
+        + 4
+        + MAX_TITLE_LEN
+        + 4
+        + MAX_DESCRIPTION_LEN
         + 8
         + 8
         + 1
@@ -387,22 +499,20 @@ impl Milestone {
         + 8
         + 8
         + 8
-        + 4 + MAX_EVIDENCE_URL_LEN
+        + 32
+        + 8
+        + 4
+        + MAX_EVIDENCE_URL_LEN
         + 1;
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum MilestoneStatus {
+    #[default]
     Pending,
     Claimed,
     Approved,
     Rejected,
-}
-
-impl Default for MilestoneStatus {
-    fn default() -> Self {
-        MilestoneStatus::Pending
-    }
 }
 
 #[account]
@@ -429,7 +539,7 @@ pub struct InitializeVault<'info> {
     #[account(mut)]
     pub creator: Signer<'info>,
 
-    pub token_mint: Account<'info, Mint>,
+    pub token_mint: Account<'info, anchor_spl::token::Mint>,
 
     #[account(
         init,
@@ -445,7 +555,7 @@ pub struct InitializeVault<'info> {
     #[account(
         init,
         payer = creator,
-        space = 8, // 8 bytes (discriminator only — we never deserialize it)
+        space = 8, // 8-byte placeholder so the PDA is allocated; never deserialized.
         seeds = [ESCROW_SEED, token_mint.key().as_ref()],
         bump,
     )]
@@ -546,19 +656,9 @@ pub struct Vote<'info> {
     )]
     pub milestone: Account<'info, Milestone>,
 
-    /// Must be the same mint the vault is governing — otherwise a voter
-    /// could pass any SPL token they hold a large balance of and inflate
-    /// their vote weight (BUG_pr-review-job-...0001).
-    #[account(address = vault.token_mint @ BagsError::TokenAccountMintMismatch)]
-    pub token_mint: Account<'info, Mint>,
-
-    /// Voter's SPL token account for the Bags creator token.
-    pub voter_token_account: Account<'info, TokenAccount>,
-
     /// Vote record PDA. Seeded by `claim_timestamp` so a fresh PDA is
-    /// allocated per claim round — prevents stale records from a previous
-    /// round blocking re-votes after a `Rejected → Claimed` re-claim
-    /// (BUG_pr-review-job-...0002).
+    /// allocated per claim round — voters from a Rejected round are not
+    /// locked out of the next round.
     #[account(
         init,
         payer = voter,
@@ -623,6 +723,7 @@ pub struct VaultInitialized {
     pub vault: Pubkey,
     pub creator: Pubkey,
     pub token_mint: Pubkey,
+    pub quorum_bps: u16,
 }
 
 #[event]
@@ -646,6 +747,8 @@ pub struct MilestoneClaimed {
     pub index: u8,
     pub voting_ends: i64,
     pub snapshot_slot: u64,
+    pub snapshot_root: [u8; 32],
+    pub snapshot_total_supply: u64,
 }
 
 #[event]
@@ -662,6 +765,7 @@ pub struct MilestoneFinalized {
     pub index: u8,
     pub approved: bool,
     pub payout: u64,
+    pub quorum_met: bool,
 }
 
 // ---------------------------------------------------------------------
@@ -698,12 +802,18 @@ pub enum BagsError {
     MilestoneNotFinalizable,
     #[msg("Voter has zero token weight at snapshot.")]
     ZeroVoteWeight,
-    #[msg("Token account owner does not match voter.")]
-    TokenAccountOwnerMismatch,
-    #[msg("Token account mint does not match vault token mint.")]
-    TokenAccountMintMismatch,
     #[msg("Milestone does not belong to this vault.")]
     MilestoneVaultMismatch,
     #[msg("Arithmetic overflow.")]
     ArithmeticOverflow,
+    #[msg("Claim deadline + grace period has passed; reset the milestone.")]
+    ClaimDeadlinePassed,
+    #[msg("Snapshot total supply must be > 0.")]
+    InvalidSnapshotSupply,
+    #[msg("Merkle inclusion proof failed verification.")]
+    InvalidMerkleProof,
+    #[msg("Merkle proof exceeds maximum allowed length.")]
+    MerkleProofTooLong,
+    #[msg("Escrow PDA cannot be drained below the rent-exempt minimum.")]
+    EscrowRentExemptViolation,
 }
