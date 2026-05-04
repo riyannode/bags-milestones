@@ -10,6 +10,8 @@ interface MilestoneCardProps {
   userSnapshotWeight: bigint;
   /** True while the snapshot+proof is still being fetched for the holder. */
   proofLoading: boolean;
+  /** Quorum threshold in basis points (passed through to VotingPanel). */
+  quorumBps: number;
   hasVoted: boolean;
   isCreator: boolean;
   isVoting: boolean;
@@ -24,6 +26,7 @@ export function MilestoneCard({
   milestone,
   userSnapshotWeight,
   proofLoading,
+  quorumBps,
   hasVoted,
   isCreator,
   isVoting,
@@ -97,6 +100,7 @@ export function MilestoneCard({
             milestone={milestone}
             userSnapshotWeight={userSnapshotWeight}
             proofLoading={proofLoading}
+            quorumBps={quorumBps}
             hasVoted={hasVoted}
             onVote={onVote}
             isVoting={isVoting}

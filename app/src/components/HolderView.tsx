@@ -1,9 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { PublicKey } from "@solana/web3.js";
 import { useBagsMilestones } from "@/lib/useBagsMilestones";
 import { loadVault } from "@/lib/loadVault";
-import { explorerUrl } from "@/lib/anchor";
+import {
+  explorerUrl,
+  findMilestonePda,
+  findVaultPda,
+  findVotePda,
+  getConnection,
+  getProgram,
+} from "@/lib/anchor";
 import { shortAddr } from "@/lib/format";
 import { EscrowBalance } from "./EscrowBalance";
 import { MilestoneCard } from "./MilestoneCard";
@@ -14,6 +22,7 @@ import { getTokenOverview } from "@/lib/birdeye";
 import { getHolderBalance } from "@/lib/helius";
 import { loadSnapshotMerkle } from "@/lib/snapshot";
 import type { SnapshotMerkle } from "@/lib/merkle";
+import { BN } from "@coral-xyz/anchor";
 
 interface HolderViewProps {
   tokenId: string;
@@ -104,6 +113,52 @@ export function HolderView({ tokenId }: HolderViewProps) {
     const entry = snapshotTree.entries.find((e) => e.wallet === walletAddress);
     return entry?.balance ?? 0n;
   }, [walletAddress, snapshotTree]);
+
+  // Detect which (if any) of the currently-claimed milestones the connected
+  // wallet has already voted on. We index by milestone index because the
+  // VoteRecord PDA seed is keyed by (milestone PDA, voter, claim_timestamp).
+  const [votedIndexes, setVotedIndexes] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    if (!walletAddress) {
+      setVotedIndexes(new Set());
+      return;
+    }
+    const claimed = milestones.filter((m) => m.status === "claimed");
+    if (claimed.length === 0) {
+      setVotedIndexes(new Set());
+      return;
+    }
+    void (async () => {
+      try {
+        const connection = getConnection();
+        const program = getProgram(connection, undefined);
+        const voter = new PublicKey(walletAddress);
+        const vaultPda = findVaultPda(new PublicKey(tokenId));
+        const voteRecordPdas = claimed.map((m) =>
+          findVotePda(
+            findMilestonePda(vaultPda, m.index),
+            voter,
+            new BN(m.claimTimestamp),
+          ),
+        );
+        const accounts = await program.account.voteRecord.fetchMultiple(
+          voteRecordPdas,
+        );
+        if (cancelled) return;
+        const next = new Set<number>();
+        accounts.forEach((acc, i) => {
+          if (acc) next.add(claimed[i].index);
+        });
+        setVotedIndexes(next);
+      } catch {
+        if (!cancelled) setVotedIndexes(new Set());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [walletAddress, tokenId, milestones, refreshKey]);
 
   const wrap = async (label: string, fn: () => Promise<string>) => {
     setBusy(label);
@@ -197,7 +252,8 @@ export function HolderView({ tokenId }: HolderViewProps) {
                   milestone={m}
                   userSnapshotWeight={userSnapshotWeight}
                   proofLoading={snapshotLoading}
-                  hasVoted={false}
+                  quorumBps={vault.quorumBps}
+                  hasVoted={votedIndexes.has(m.index)}
                   isCreator={false}
                   isVoting={busy === `vote-${m.index}`}
                   isClaiming={false}
