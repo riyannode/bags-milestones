@@ -81,6 +81,8 @@ export interface BirdeyeTokenOverview {
   v24hUSD?: number;
   v24hChangePercent?: number;
   price?: number;
+  symbol?: string;
+  name?: string;
 }
 
 // -----------------------------------------------------------------

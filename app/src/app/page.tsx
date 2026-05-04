@@ -1,8 +1,24 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { WalletConnect } from "@/components/WalletConnect";
 import { TokenSearch } from "@/components/TokenSearch";
 import { Constellation } from "@/components/Constellation";
 import { Logo } from "@/components/Logo";
+import { TopTokensTable } from "@/components/TopTokensTable";
+import { TOP_TOKENS_REVALIDATE_S } from "@/lib/topTokens";
+
+// The leaderboard depends on on-chain data + Birdeye; revalidate every minute.
+export const revalidate = TOP_TOKENS_REVALIDATE_S;
+
+function TopTokensFallback() {
+  return (
+    <section className="mt-24">
+      <div className="glass mt-6 rounded-2xl p-6 text-fg-muted">
+        Loading on-chain leaderboard…
+      </div>
+    </section>
+  );
+}
 
 export default function LandingPage() {
   return (
@@ -46,18 +62,18 @@ export default function LandingPage() {
         </div>
 
         <h1 className="mt-6 text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-6xl md:text-7xl">
-          Lock royalties.{" "}
+          From speculation to{" "}
           <span className="text-primary [text-shadow:0_0_30px_rgba(157,255,61,0.45)]">
-            Vote milestones.
+            accountable
           </span>
-          <br className="hidden sm:block" /> Build trust.
+          <br className="hidden sm:block" /> creator crowdfunding.
         </h1>
 
         <p className="mx-auto mt-6 max-w-2xl text-balance text-base text-fg-muted">
-          <span className="font-mono text-primary">Bagscrow</span> is the
-          accountability layer for Bags.fm creators. Royalties lock in an
-          on-chain escrow. Token holders vote to release them as creators ship
-          milestones. No more vibes-only tokens.
+          <span className="font-mono text-primary">Bagscrow</span> turns Bags.fm
+          royalties into milestone-gated funding. Royalties lock in a
+          program-owned escrow. Holders vote on releases with weight pinned to
+          a snapshot — last-minute buys can&rsquo;t sway the result.
         </p>
 
         <div className="mt-10">
@@ -83,9 +99,9 @@ export default function LandingPage() {
         <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[11px] uppercase tracking-[0.2em] text-fg-muted">
           <span>Solana · Devnet live</span>
           <span className="text-fg-muted/40">·</span>
-          <span>Anchor smart contract</span>
+          <span>Merkle-snapshot voting</span>
           <span className="text-fg-muted/40">·</span>
-          <span>14 / 14 tests passing</span>
+          <span>16 / 16 tests passing</span>
         </div>
       </section>
 
@@ -100,13 +116,13 @@ export default function LandingPage() {
           {
             n: "02",
             t: "Holders vote",
-            d: "Vote weight = token balance at the snapshot slot. Last-minute buys can't sway the result.",
+            d: "Vote weight is committed to a Merkle snapshot at claim time. Buying tokens after claim has zero effect on the tally.",
             accent: "warning",
           },
           {
             n: "03",
             t: "Funds unlock",
-            d: "Majority approve → royalties release to the creator. Reject → funds stay locked until the next claim.",
+            d: "5% supply quorum + majority approve → royalties release. Reject → funds stay locked; creator can re-claim within 7 days.",
             accent: "success",
           },
         ].map((s) => (
@@ -129,12 +145,16 @@ export default function LandingPage() {
         ))}
       </section>
 
+      <Suspense fallback={<TopTokensFallback />}>
+        <TopTokensTable />
+      </Suspense>
+
       <section className="mt-16 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
           { k: "Escrow scheme", v: "Program-PDA · non-custodial" },
-          { k: "Voting window", v: "72h · snapshot at claim" },
-          { k: "Replay-safe", v: "Per-claim vote PDA" },
-          { k: "Built on", v: "Bags · Helius · Privy" },
+          { k: "Voting weight", v: "Merkle snapshot at claim" },
+          { k: "Voting window", v: "72h · 5% supply quorum" },
+          { k: "Built on", v: "Bags · Helius · Birdeye · Privy" },
         ].map((m) => (
           <div key={m.k} className="glass rounded-xl px-4 py-3">
             <div className="text-[10px] uppercase tracking-[0.2em] text-fg-muted">
