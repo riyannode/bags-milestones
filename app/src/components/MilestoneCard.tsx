@@ -6,8 +6,10 @@ import { VotingPanel } from "./VotingPanel";
 
 interface MilestoneCardProps {
   milestone: MilestoneView;
-  /** Token balance the connected user holds (0 if not connected / not a holder). */
-  userTokenBalance: number;
+  /** User's weight at the snapshot slot for this milestone (token base units). */
+  userSnapshotWeight: bigint;
+  /** True while the snapshot+proof is still being fetched for the holder. */
+  proofLoading: boolean;
   hasVoted: boolean;
   isCreator: boolean;
   isVoting: boolean;
@@ -20,7 +22,8 @@ interface MilestoneCardProps {
 
 export function MilestoneCard({
   milestone,
-  userTokenBalance,
+  userSnapshotWeight,
+  proofLoading,
   hasVoted,
   isCreator,
   isVoting,
@@ -92,7 +95,8 @@ export function MilestoneCard({
         <div className="mt-4">
           <VotingPanel
             milestone={milestone}
-            userTokenBalance={userTokenBalance}
+            userSnapshotWeight={userSnapshotWeight}
+            proofLoading={proofLoading}
             hasVoted={hasVoted}
             onVote={onVote}
             isVoting={isVoting}

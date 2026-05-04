@@ -10,6 +10,7 @@ import { EscrowBalance } from "./EscrowBalance";
 import { MilestoneCard } from "./MilestoneCard";
 import type { MilestoneView, VaultView } from "@/types";
 import { getCreatorRoyalties } from "@/lib/bags";
+import { invalidateSnapshot, loadSnapshotMerkle } from "@/lib/snapshot";
 
 interface CreatorDashboardProps {
   tokenId: string;
@@ -197,7 +198,8 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
                 <MilestoneCard
                   key={m.index}
                   milestone={m}
-                  userTokenBalance={0}
+                  userSnapshotWeight={0n}
+                  proofLoading={false}
                   hasVoted={false}
                   isCreator={Boolean(isCreator)}
                   isVoting={false}
@@ -205,9 +207,26 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
                   isFinalizing={busy === `finalize-${m.index}`}
                   onVote={() => Promise.resolve()}
                   onClaim={(url) =>
-                    wrap(`claim-${m.index}`, () =>
-                      claimMilestone(tokenId, m.index, url),
-                    )
+                    wrap(`claim-${m.index}`, async () => {
+                      // Build the holder snapshot Merkle tree at claim time.
+                      // The root + total supply commit on-chain so holders
+                      // later can verify their voting weight.
+                      const tree = await loadSnapshotMerkle(tokenId);
+                      if (tree.totalSupply <= 0n) {
+                        throw new Error(
+                          "No holders found in snapshot. Cannot claim.",
+                        );
+                      }
+                      const sig = await claimMilestone(
+                        tokenId,
+                        m.index,
+                        url,
+                        tree.root,
+                        tree.totalSupply,
+                      );
+                      invalidateSnapshot(tokenId);
+                      return sig;
+                    })
                   }
                   onFinalize={() =>
                     wrap(`finalize-${m.index}`, () =>

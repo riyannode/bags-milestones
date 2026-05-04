@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from "react";
 import type { MilestoneView } from "@/types";
-import { formatSol, timeRemaining } from "@/lib/format";
+import { timeRemaining } from "@/lib/format";
 
 interface VotingPanelProps {
   milestone: MilestoneView;
-  userTokenBalance: number;
+  /** User's weight at the snapshot slot (token base units). */
+  userSnapshotWeight: bigint;
+  /** True while the snapshot+proof is still being fetched. */
+  proofLoading: boolean;
   hasVoted: boolean;
   onVote: (approve: boolean) => void | Promise<void>;
   isVoting: boolean;
@@ -17,9 +20,16 @@ interface VotingPanelProps {
  * countdown to `votingEnds`, the user's current weight, and approve /
  * reject buttons (disabled if user already voted or has zero balance).
  */
+function bigintToNumber(b: bigint): number {
+  // Snapshot supply fits in u64; converting to Number is fine for display
+  // (loses precision above 2^53, but that's larger than any practical mint).
+  return Number(b);
+}
+
 export function VotingPanel({
   milestone,
-  userTokenBalance,
+  userSnapshotWeight,
+  proofLoading,
   hasVoted,
   onVote,
   isVoting,
@@ -30,11 +40,16 @@ export function VotingPanel({
     return () => clearInterval(id);
   }, []);
 
-  const totalVotes = milestone.votesApprove + milestone.votesReject;
-  const approvePct = totalVotes ? (milestone.votesApprove / totalVotes) * 100 : 50;
-  const rejectPct = totalVotes ? (milestone.votesReject / totalVotes) * 100 : 50;
+  const approveNum = bigintToNumber(milestone.votesApprove);
+  const rejectNum = bigintToNumber(milestone.votesReject);
+  const totalVotes = approveNum + rejectNum;
+  const approvePct = totalVotes ? (approveNum / totalVotes) * 100 : 50;
+  const rejectPct = totalVotes ? (rejectNum / totalVotes) * 100 : 50;
+  const supplyNum = bigintToNumber(milestone.snapshotTotalSupply);
+  const turnoutPct = supplyNum > 0 ? (totalVotes / supplyNum) * 100 : 0;
   const ended = now >= milestone.votingEnds;
-  const canVote = !hasVoted && userTokenBalance > 0 && !ended;
+  const canVote =
+    !hasVoted && userSnapshotWeight > 0n && !ended && !proofLoading;
 
   return (
     <div
@@ -61,7 +76,7 @@ export function VotingPanel({
           <div className="flex justify-between text-[11px] uppercase tracking-[0.18em] text-fg-muted">
             <span>Approve</span>
             <span className="font-mono normal-case tracking-normal text-fg">
-              {formatSol(milestone.votesApprove, 0)} ({approvePct.toFixed(1)}%)
+              {approveNum.toLocaleString()} ({approvePct.toFixed(1)}%)
             </span>
           </div>
           <div
@@ -82,7 +97,7 @@ export function VotingPanel({
           <div className="flex justify-between text-[11px] uppercase tracking-[0.18em] text-fg-muted">
             <span>Reject</span>
             <span className="font-mono normal-case tracking-normal text-fg">
-              {formatSol(milestone.votesReject, 0)} ({rejectPct.toFixed(1)}%)
+              {rejectNum.toLocaleString()} ({rejectPct.toFixed(1)}%)
             </span>
           </div>
           <div
@@ -101,12 +116,22 @@ export function VotingPanel({
         </div>
       </div>
 
+      <div className="mt-3 flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-fg-muted">
+        <span>Turnout</span>
+        <span className="font-mono normal-case tracking-normal text-fg">
+          {turnoutPct.toFixed(1)}% of snapshot
+        </span>
+      </div>
+
       <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
         <div className="text-[11px] uppercase tracking-[0.18em] text-fg-muted">
-          Your weight ·{" "}
+          Your snapshot weight ·{" "}
           <span className="font-mono normal-case tracking-normal text-fg">
-            {userTokenBalance.toLocaleString()}
+            {bigintToNumber(userSnapshotWeight).toLocaleString()}
           </span>
+          {proofLoading && (
+            <span className="ml-2 normal-case text-fg-muted/70">· building proof…</span>
+          )}
         </div>
         <div className="flex gap-2">
           <button
@@ -131,9 +156,10 @@ export function VotingPanel({
       {hasVoted && (
         <p className="mt-3 text-xs text-fg-muted">You&rsquo;ve already voted.</p>
       )}
-      {!hasVoted && userTokenBalance === 0 && !ended && (
+      {!hasVoted && !proofLoading && userSnapshotWeight === 0n && !ended && (
         <p className="mt-3 text-xs text-fg-muted">
-          Hold the token to gain voting weight.
+          You held no tokens at the snapshot slot, so you can&rsquo;t vote on this
+          milestone.
         </p>
       )}
     </div>

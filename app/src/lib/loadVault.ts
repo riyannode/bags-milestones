@@ -13,6 +13,12 @@ import {
 } from "./anchor";
 import type { MilestoneStatus, MilestoneView, VaultView } from "@/types";
 
+function toUint8Array32(buf: number[] | Uint8Array | Buffer): Uint8Array {
+  const arr = Array.isArray(buf) ? Uint8Array.from(buf) : new Uint8Array(buf);
+  if (arr.length !== 32) throw new Error(`expected 32 bytes, got ${arr.length}`);
+  return arr;
+}
+
 interface LoadResult {
   vault: VaultView;
   milestones: MilestoneView[];
@@ -54,6 +60,7 @@ export async function loadVault(mint: string): Promise<LoadResult | null> {
     tokenMint: vaultAcc.tokenMint.toBase58(),
     escrowBalance: vaultAcc.escrowBalance.toNumber(),
     milestoneCount: vaultAcc.milestoneCount,
+    quorumBps: vaultAcc.quorumBps,
   };
 
   const milestonePdas = Array.from(
@@ -73,11 +80,16 @@ export async function loadVault(mint: string): Promise<LoadResult | null> {
       deadline: m.deadline.toNumber(),
       amountLocked: m.amountLocked.toNumber(),
       status: decodeStatus(m.status as unknown as OnChainStatus),
-      votesApprove: m.votesApprove.toNumber(),
-      votesReject: m.votesReject.toNumber(),
+      votesApprove: BigInt(m.votesApprove.toString()),
+      votesReject: BigInt(m.votesReject.toString()),
       votingEnds: m.votingEnds.toNumber(),
       evidenceUrl: m.evidenceUrl,
       snapshotSlot: m.snapshotSlot.toNumber(),
+      snapshotRoot: toUint8Array32(
+        m.snapshotRoot as unknown as number[] | Uint8Array | Buffer,
+      ),
+      snapshotTotalSupply: BigInt(m.snapshotTotalSupply.toString()),
+      claimTimestamp: m.claimTimestamp.toNumber(),
     });
   }
 

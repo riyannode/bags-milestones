@@ -17,12 +17,21 @@ export interface MilestoneView {
   /** Lamports. */
   amountLocked: number;
   status: MilestoneStatus;
-  votesApprove: number;
-  votesReject: number;
+  /** Sum of `claimed_weight` from approve voters — token base units. */
+  votesApprove: bigint;
+  /** Sum of `claimed_weight` from reject voters — token base units. */
+  votesReject: bigint;
   /** Unix-timestamp seconds; 0 if not yet claimed. */
   votingEnds: number;
   evidenceUrl: string;
+  /** Slot at which the holder snapshot was taken. */
   snapshotSlot: number;
+  /** keccak Merkle root of `keccak(voter_pubkey || balance_le8)` leaves. */
+  snapshotRoot: Uint8Array;
+  /** Sum of all leaf balances in the snapshot — token base units. */
+  snapshotTotalSupply: bigint;
+  /** Unix-timestamp seconds when the current claim was made (0 = never). */
+  claimTimestamp: number;
 }
 
 export interface VaultView {
@@ -32,6 +41,8 @@ export interface VaultView {
   /** Lamports. */
   escrowBalance: number;
   milestoneCount: number;
+  /** Quorum threshold in basis points (e.g. `500` = 5%). */
+  quorumBps: number;
 }
 
 // -----------------------------------------------------------------
