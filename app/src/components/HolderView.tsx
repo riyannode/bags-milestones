@@ -16,7 +16,13 @@ import { shortAddr } from "@/lib/format";
 import { EscrowBalance } from "./EscrowBalance";
 import { MilestoneCard } from "./MilestoneCard";
 import { HolderSnapshot } from "./HolderSnapshot";
-import type { BagsHolder, MilestoneView, VaultView } from "@/types";
+import { BagsRoyaltyHistory } from "./BagsRoyaltyHistory";
+import type {
+  BagsHolder,
+  BagsTokenInfo,
+  MilestoneView,
+  VaultView,
+} from "@/types";
 import { getHolders, getTokenInfo } from "@/lib/bags";
 import { getTokenOverview } from "@/lib/birdeye";
 import { getHolderBalance } from "@/lib/helius";
@@ -34,7 +40,7 @@ export function HolderView({ tokenId }: HolderViewProps) {
   const [vault, setVault] = useState<VaultView | null>(null);
   const [milestones, setMilestones] = useState<MilestoneView[]>([]);
   const [holders, setHolders] = useState<BagsHolder[]>([]);
-  const [tokenName, setTokenName] = useState<string | null>(null);
+  const [tokenInfo, setTokenInfo] = useState<BagsTokenInfo | null>(null);
   const [marketCap, setMarketCap] = useState<number | null>(null);
   const [vol24h, setVol24h] = useState<number | null>(null);
   const [userBalance, setUserBalance] = useState<number>(0);
@@ -60,7 +66,7 @@ export function HolderView({ tokenId }: HolderViewProps) {
       setVault(v?.vault ?? null);
       setMilestones(v?.milestones ?? []);
       setHolders(h);
-      setTokenName(info?.name ?? info?.symbol ?? null);
+      setTokenInfo(info);
       setMarketCap(overview?.mc ?? null);
       setVol24h(overview?.v24hUSD ?? null);
     })();
@@ -179,18 +185,58 @@ export function HolderView({ tokenId }: HolderViewProps) {
       {/* Token header */}
       <div className="glass relative overflow-hidden rounded-2xl p-6">
         <div className="bg-dotgrid absolute inset-0 -z-10 opacity-30" />
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-fg-muted">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary shadow-glow-soft" />
-              Holder view
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-4">
+            {/* Bags token image, when available. Falls back silently. */}
+            {tokenInfo?.imageUrl && (
+              <span
+                className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-border bg-white/[0.02]"
+                aria-hidden
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={tokenInfo.imageUrl}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                />
+              </span>
+            )}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-fg-muted">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary shadow-glow-soft" />
+                Holder view
+              </div>
+              <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">
+                {tokenInfo?.name ?? tokenInfo?.symbol ?? "Bags token"}
+              </h1>
+              <p className="font-mono text-xs text-fg-muted">
+                {shortAddr(tokenId, 6, 6)}
+              </p>
+              {(tokenInfo?.creator || tokenInfo?.royaltyPercent != null) && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-fg-muted">
+                  {tokenInfo?.creator && (
+                    <span className="inline-flex items-center gap-1">
+                      Creator
+                      <a
+                        href={`https://explorer.solana.com/address/${tokenInfo.creator}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-mono text-fg/85 hover:text-primary"
+                      >
+                        {shortAddr(tokenInfo.creator, 4, 4)} ↗
+                      </a>
+                    </span>
+                  )}
+                  {tokenInfo?.royaltyPercent != null && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-fg-muted">
+                      {tokenInfo.royaltyPercent}% royalty
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
-            <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">
-              {tokenName ?? "Bags token"}
-            </h1>
-            <p className="font-mono text-xs text-fg-muted">
-              {shortAddr(tokenId, 6, 6)}
-            </p>
           </div>
           {(marketCap !== null || vol24h !== null) && (
             <div className="flex flex-wrap gap-3">
@@ -236,6 +282,8 @@ export function HolderView({ tokenId }: HolderViewProps) {
               highlightWallet={walletAddress}
             />
           </div>
+
+          <BagsRoyaltyHistory mint={tokenId} limit={5} />
 
           <div className="space-y-4">
             <h2 className="text-[11px] uppercase tracking-[0.2em] text-fg-muted">
