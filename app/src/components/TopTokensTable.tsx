@@ -14,7 +14,9 @@ function formatUsd(n: number | null | undefined): string {
 }
 
 function StatusDot({ row }: { row: TopTokenRow }) {
-  // Visual state: green = funds released, lime = locked & active, gray = empty.
+  // Visual state: green = funds released, lime + pulse = locked & active,
+  // gray = empty/idle. Pulse only on the "active" state so it reads as
+  // a live indicator without the rest of the table feeling jittery.
   if (row.releasedLamports > 0) {
     return (
       <span
@@ -30,7 +32,7 @@ function StatusDot({ row }: { row: TopTokenRow }) {
   if (row.lockedLamports > 0) {
     return (
       <span
-        className="inline-block h-1.5 w-1.5 rounded-full"
+        className="pulse-active inline-block h-1.5 w-1.5 rounded-full"
         style={{
           background: "var(--primary)",
           boxShadow: "0 0 8px rgba(157,255,61,0.6)",
@@ -59,7 +61,7 @@ export async function TopTokensTable() {
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-fg-muted">
             Live leaderboard
           </div>
-          <h2 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+          <h2 className="mt-1 font-display text-2xl font-semibold tracking-tight sm:text-3xl">
             Top tokens by royalty volume
           </h2>
           <p className="mt-1 max-w-xl text-sm text-fg-muted">

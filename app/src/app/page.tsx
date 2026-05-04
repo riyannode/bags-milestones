@@ -20,6 +20,83 @@ function TopTokensFallback() {
   );
 }
 
+/** Inline SVG icons sized for the step-card glyph slot. Currentcolor keeps
+ * them tinted by the per-step accent without an extra prop. */
+const ICON = {
+  lock: (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="4" y="11" width="16" height="10" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  ),
+  check: (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M9 12l2 2 4-4" />
+      <circle cx="12" cy="12" r="9" />
+    </svg>
+  ),
+  unlock: (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="4" y="11" width="16" height="10" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 7.5-2" />
+    </svg>
+  ),
+};
+
+const STEPS = [
+  {
+    n: "01",
+    accent: "primary",
+    icon: ICON.lock,
+    t: "Lock royalties",
+    d: "Creator launches a vault for their Bags token and commits up to 5 milestones with SOL amounts and deadlines. Royalties auto-deposit into a program-owned escrow.",
+  },
+  {
+    n: "02",
+    accent: "warning",
+    icon: ICON.check,
+    t: "Claim with proof",
+    d: "On the deadline, the creator submits delivery evidence. Holder list is snapshotted into a Merkle root — voting weight is locked, late buyers get zero say.",
+  },
+  {
+    n: "03",
+    accent: "success",
+    icon: ICON.unlock,
+    t: "Holders vote → release",
+    d: "72-hour window. Majority approve + 5% supply quorum → SOL releases to the creator. Reject → funds stay locked, creator re-claims within 7 days.",
+  },
+] as const;
+
 export default function LandingPage() {
   return (
     <main className="relative mx-auto max-w-6xl px-6 py-8">
@@ -65,11 +142,9 @@ export default function LandingPage() {
           On-chain accountability for Bags creator tokens
         </div>
 
-        <h1 className="mt-6 text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-6xl md:text-7xl">
+        <h1 className="mt-6 font-display text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-6xl md:text-7xl">
           Building{" "}
-          <span className="text-primary [text-shadow:0_0_30px_rgba(157,255,61,0.45)]">
-            real trust
-          </span>
+          <span className="text-glow-primary text-primary">real trust</span>
           <br className="hidden sm:block" /> between Bags creators and holders.
         </h1>
 
@@ -130,44 +205,62 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section id="how" className="mt-28 grid gap-5 sm:grid-cols-3">
-        {[
-          {
-            n: "01",
-            t: "Creators commit",
-            d: "Up to 5 milestones with deadlines and SOL amounts. Royalties lock in a program-owned escrow.",
-            accent: "primary",
-          },
-          {
-            n: "02",
-            t: "Holders vote",
-            d: "Vote weight is committed to a Merkle snapshot at claim time. Buying tokens after claim has zero effect on the tally.",
-            accent: "warning",
-          },
-          {
-            n: "03",
-            t: "Funds unlock",
-            d: "5% supply quorum + majority approve → royalties release. Reject → funds stay locked; creator can re-claim within 7 days.",
-            accent: "success",
-          },
-        ].map((s) => (
-          <div
-            key={s.n}
-            className="glass relative overflow-hidden rounded-2xl p-5"
-          >
-            <div className="bg-dotgrid absolute inset-0 -z-10 opacity-40" />
-            <div
-              className="font-mono text-xs uppercase tracking-[0.2em]"
-              style={{ color: `var(--${s.accent})` }}
-            >
-              STEP {s.n}
-            </div>
-            <div className="mt-3 text-lg font-semibold tracking-tight">
-              {s.t}
-            </div>
-            <p className="mt-2 text-sm text-fg-muted">{s.d}</p>
+      <section id="how" className="mt-28">
+        <div className="text-center">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-fg-muted">
+            How it works
           </div>
-        ))}
+          <h2 className="mt-1 font-display text-2xl font-semibold tracking-tight sm:text-3xl">
+            Three steps from royalty to release.
+          </h2>
+        </div>
+
+        <ol className="relative mt-10 grid gap-5 sm:grid-cols-3">
+          {STEPS.map((s, i) => (
+            <li key={s.n} className="relative">
+              {/* Connector arrow rendered on the parent <li> so the inner card's
+               * overflow-hidden (needed for the rounded dot-grid background)
+               * doesn't clip it. Hidden on the last card. */}
+              {i < STEPS.length - 1 && (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute right-0 top-1/2 z-10 hidden translate-x-1/2 -translate-y-1/2 select-none text-2xl text-fg-muted/40 sm:block"
+                >
+                  →
+                </span>
+              )}
+
+              <div className="glass group relative h-full overflow-hidden rounded-2xl p-5 transition-colors hover:border-primary/30">
+                <div className="bg-dotgrid absolute inset-0 -z-10 opacity-40" />
+
+                <div className="flex items-center justify-between">
+                  <span
+                    className="font-mono text-xs uppercase tracking-[0.2em]"
+                    style={{ color: `var(--${s.accent})` }}
+                  >
+                    STEP {s.n}
+                  </span>
+                  <span
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border"
+                    style={{
+                      borderColor: `var(--${s.accent})`,
+                      background: `color-mix(in srgb, var(--${s.accent}) 12%, transparent)`,
+                      color: `var(--${s.accent})`,
+                    }}
+                    aria-hidden
+                  >
+                    {s.icon}
+                  </span>
+                </div>
+
+                <div className="mt-4 font-display text-lg font-semibold tracking-tight">
+                  {s.t}
+                </div>
+                <p className="mt-2 text-sm text-fg-muted">{s.d}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
       </section>
 
       <Suspense fallback={<TopTokensFallback />}>

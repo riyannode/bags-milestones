@@ -185,7 +185,7 @@ export function HolderView({ tokenId }: HolderViewProps) {
               <span className="h-1.5 w-1.5 rounded-full bg-primary shadow-glow-soft" />
               Holder view
             </div>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+            <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">
               {tokenName ?? "Bags token"}
             </h1>
             <p className="font-mono text-xs text-fg-muted">

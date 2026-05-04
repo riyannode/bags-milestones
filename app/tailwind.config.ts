@@ -25,6 +25,14 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
+        display: [
+          "var(--font-display)",
+          "Space Grotesk",
+          "var(--font-inter)",
+          "Inter",
+          "system-ui",
+          "sans-serif",
+        ],
         mono: [
           "var(--font-jetbrains)",
           "JetBrains Mono",
