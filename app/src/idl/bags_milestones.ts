@@ -17,7 +17,14 @@ export type BagsMilestones = {
       "name": "claimMilestone",
       "docs": [
         "Creator claims that milestone `index` is complete. Opens a 72h voting",
-        "window and snapshots the current slot for vote-weight verification."
+        "window and stores the snapshot Merkle root + total supply that voters",
+        "will be checked against.",
+        "",
+        "Off-chain, the caller MUST build a Merkle tree whose leaves are",
+        "`keccak(voter_pubkey || balance.to_le_bytes())` for every holder of",
+        "the token at the current slot. The root is committed on-chain; the",
+        "`MilestoneClaimed` event emits the snapshot slot so any indexer can",
+        "independently rebuild the same tree and verify the root."
       ],
       "discriminator": [
         211,
@@ -73,6 +80,19 @@ export type BagsMilestones = {
         {
           "name": "evidenceUrl",
           "type": "string"
+        },
+        {
+          "name": "snapshotRoot",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "snapshotTotalSupply",
+          "type": "u64"
         }
       ]
     },
@@ -80,8 +100,9 @@ export type BagsMilestones = {
       "name": "depositRoyalty",
       "docs": [
         "Top up the escrow PDA. Anyone can deposit (creator forwarding royalties,",
-        "a webhook crank, etc.). The on-chain `escrow_balance` field is updated",
-        "so the UI does not have to subtract rent-exempt minimum repeatedly."
+        "a webhook crank, etc.). The on-chain `escrow_balance` tracks deposits",
+        "for UI convenience; `finalize_milestone` always reconciles against the",
+        "PDA's actual lamport balance so out-of-band deposits also count."
       ],
       "discriminator": [
         234,
@@ -162,9 +183,17 @@ export type BagsMilestones = {
       "name": "finalizeMilestone",
       "docs": [
         "Finalize a milestone after the voting window closes. Permissionless —",
-        "anyone may call to pay the gas. Releases escrow to the creator on",
-        "majority approve, otherwise marks the milestone `Rejected` and leaves",
-        "funds locked (creator may re-submit evidence and re-claim)."
+        "anyone may call to pay the gas. Honors quorum: if total turnout is",
+        "below `quorum_bps` of the snapshot supply, the milestone is marked",
+        "`Rejected` regardless of approve/reject ratio (the creator may",
+        "re-claim with a fresh evidence + snapshot). Otherwise a strict",
+        "majority of approve over reject releases the funds.",
+        "",
+        "Payout is capped at the actual liquid lamport balance of the escrow",
+        "PDA (`escrow.lamports() - rent_exempt_min`). This means out-of-band",
+        "SOL transfers into the PDA are payable, and a partial payout is",
+        "emitted via `MilestoneFinalized.payout` if the escrow is short of",
+        "`amount_locked`."
       ],
       "discriminator": [
         7,
@@ -413,13 +442,14 @@ export type BagsMilestones = {
     {
       "name": "vote",
       "docs": [
-        "Cast a vote on a `Claimed` milestone. Voting weight comes from the",
-        "caller's current SPL token balance; the `snapshot_slot` is recorded",
-        "for off-chain verification (clients should reject vote attempts that",
-        "would have had zero balance at the snapshot slot).",
+        "Cast a vote on a `Claimed` milestone. The voter proves their balance",
+        "at the snapshot slot via a Merkle inclusion proof against",
+        "`milestone.snapshot_root`. The proven weight is what counts —",
+        "buying tokens after claim does not inflate vote power.",
         "",
         "Anti-double-vote is enforced by the `VoteRecord` PDA being created",
-        "fresh — re-vote attempts will fail at account init."
+        "fresh (seeded by `claim_timestamp`, so each re-claim opens a new",
+        "round of votes)."
       ],
       "discriminator": [
         227,
@@ -464,26 +494,11 @@ export type BagsMilestones = {
           "writable": true
         },
         {
-          "name": "tokenMint",
-          "docs": [
-            "Must be the same mint the vault is governing — otherwise a voter",
-            "could pass any SPL token they hold a large balance of and inflate",
-            "their vote weight (BUG_pr-review-job-...0001)."
-          ]
-        },
-        {
-          "name": "voterTokenAccount",
-          "docs": [
-            "Voter's SPL token account for the Bags creator token."
-          ]
-        },
-        {
           "name": "voteRecord",
           "docs": [
             "Vote record PDA. Seeded by `claim_timestamp` so a fresh PDA is",
-            "allocated per claim round — prevents stale records from a previous",
-            "round blocking re-votes after a `Rejected → Claimed` re-claim",
-            "(BUG_pr-review-job-...0002)."
+            "allocated per claim round — voters from a Rejected round are not",
+            "locked out of the next round."
           ],
           "writable": true,
           "pda": {
@@ -526,6 +541,21 @@ export type BagsMilestones = {
         {
           "name": "approve",
           "type": "bool"
+        },
+        {
+          "name": "claimedWeight",
+          "type": "u64"
+        },
+        {
+          "name": "proof",
+          "type": {
+            "vec": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
         }
       ]
     }
@@ -724,23 +754,38 @@ export type BagsMilestones = {
     },
     {
       "code": 6014,
-      "name": "tokenAccountOwnerMismatch",
-      "msg": "Token account owner does not match voter."
-    },
-    {
-      "code": 6015,
-      "name": "tokenAccountMintMismatch",
-      "msg": "Token account mint does not match vault token mint."
-    },
-    {
-      "code": 6016,
       "name": "milestoneVaultMismatch",
       "msg": "Milestone does not belong to this vault."
     },
     {
-      "code": 6017,
+      "code": 6015,
       "name": "arithmeticOverflow",
       "msg": "Arithmetic overflow."
+    },
+    {
+      "code": 6016,
+      "name": "claimDeadlinePassed",
+      "msg": "Claim deadline + grace period has passed; reset the milestone."
+    },
+    {
+      "code": 6017,
+      "name": "invalidSnapshotSupply",
+      "msg": "Snapshot total supply must be > 0."
+    },
+    {
+      "code": 6018,
+      "name": "invalidMerkleProof",
+      "msg": "Merkle inclusion proof failed verification."
+    },
+    {
+      "code": 6019,
+      "name": "merkleProofTooLong",
+      "msg": "Merkle proof exceeds maximum allowed length."
+    },
+    {
+      "code": 6020,
+      "name": "escrowRentExemptViolation",
+      "msg": "Escrow PDA cannot be drained below the rent-exempt minimum."
     }
   ],
   "types": [
@@ -802,6 +847,19 @@ export type BagsMilestones = {
             "type": "u64"
           },
           {
+            "name": "snapshotRoot",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "snapshotTotalSupply",
+            "type": "u64"
+          },
+          {
             "name": "evidenceUrl",
             "type": "string"
           },
@@ -832,6 +890,19 @@ export type BagsMilestones = {
           {
             "name": "snapshotSlot",
             "type": "u64"
+          },
+          {
+            "name": "snapshotRoot",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "snapshotTotalSupply",
+            "type": "u64"
           }
         ]
       }
@@ -856,6 +927,10 @@ export type BagsMilestones = {
           {
             "name": "payout",
             "type": "u64"
+          },
+          {
+            "name": "quorumMet",
+            "type": "bool"
           }
         ]
       }
@@ -926,6 +1001,10 @@ export type BagsMilestones = {
             "type": "u8"
           },
           {
+            "name": "quorumBps",
+            "type": "u16"
+          },
+          {
             "name": "bump",
             "type": "u8"
           },
@@ -972,6 +1051,10 @@ export type BagsMilestones = {
           {
             "name": "tokenMint",
             "type": "pubkey"
+          },
+          {
+            "name": "quorumBps",
+            "type": "u16"
           }
         ]
       }
