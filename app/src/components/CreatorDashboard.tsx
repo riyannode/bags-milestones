@@ -10,6 +10,7 @@ import { EscrowBalance } from "./EscrowBalance";
 import { MilestoneCard } from "./MilestoneCard";
 import { MilestoneTimeline } from "./MilestoneTimeline";
 import { UndepositedRoyaltiesPanel } from "./UndepositedRoyaltiesPanel";
+import { LiveRoyaltyFeed } from "./LiveRoyaltyFeed";
 import type { MilestoneView, VaultView } from "@/types";
 import { getCreatorRoyalties } from "@/lib/bags";
 import { invalidateSnapshot, loadSnapshotMerkle } from "@/lib/snapshot";
@@ -154,6 +155,11 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
               </div>
             )}
           </div>
+
+          {/* Live webhook stream — only renders when KV is provisioned and
+           * the viewer is the creator. Self-hides if the panel returns
+           * `enabled: false`. */}
+          {isCreator && <LiveRoyaltyFeed wallet={vault.creator} />}
 
           {/* Milestone slot overview — always visible, even for non-creators. */}
           <MilestoneTimeline milestones={milestones} />
