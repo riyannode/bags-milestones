@@ -217,46 +217,47 @@ export default function LandingPage() {
 
         <ol className="relative mt-10 grid gap-5 sm:grid-cols-3">
           {STEPS.map((s, i) => (
-            <li
-              key={s.n}
-              className="glass group relative overflow-hidden rounded-2xl p-5 transition-colors hover:border-primary/30"
-            >
-              <div className="bg-dotgrid absolute inset-0 -z-10 opacity-40" />
-
-              {/* Connector arrow between cards on desktop */}
+            <li key={s.n} className="relative">
+              {/* Connector arrow rendered on the parent <li> so the inner card's
+               * overflow-hidden (needed for the rounded dot-grid background)
+               * doesn't clip it. Hidden on the last card. */}
               {i < STEPS.length - 1 && (
                 <span
                   aria-hidden
-                  className="pointer-events-none absolute -right-3 top-1/2 hidden -translate-y-1/2 text-fg-muted/30 sm:block"
+                  className="pointer-events-none absolute right-0 top-1/2 z-10 hidden translate-x-1/2 -translate-y-1/2 select-none text-2xl text-fg-muted/40 sm:block"
                 >
                   →
                 </span>
               )}
 
-              <div className="flex items-center justify-between">
-                <span
-                  className="font-mono text-xs uppercase tracking-[0.2em]"
-                  style={{ color: `var(--${s.accent})` }}
-                >
-                  STEP {s.n}
-                </span>
-                <span
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border"
-                  style={{
-                    borderColor: `var(--${s.accent})`,
-                    background: `color-mix(in srgb, var(--${s.accent}) 12%, transparent)`,
-                    color: `var(--${s.accent})`,
-                  }}
-                  aria-hidden
-                >
-                  {s.icon}
-                </span>
-              </div>
+              <div className="glass group relative h-full overflow-hidden rounded-2xl p-5 transition-colors hover:border-primary/30">
+                <div className="bg-dotgrid absolute inset-0 -z-10 opacity-40" />
 
-              <div className="mt-4 font-display text-lg font-semibold tracking-tight">
-                {s.t}
+                <div className="flex items-center justify-between">
+                  <span
+                    className="font-mono text-xs uppercase tracking-[0.2em]"
+                    style={{ color: `var(--${s.accent})` }}
+                  >
+                    STEP {s.n}
+                  </span>
+                  <span
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border"
+                    style={{
+                      borderColor: `var(--${s.accent})`,
+                      background: `color-mix(in srgb, var(--${s.accent}) 12%, transparent)`,
+                      color: `var(--${s.accent})`,
+                    }}
+                    aria-hidden
+                  >
+                    {s.icon}
+                  </span>
+                </div>
+
+                <div className="mt-4 font-display text-lg font-semibold tracking-tight">
+                  {s.t}
+                </div>
+                <p className="mt-2 text-sm text-fg-muted">{s.d}</p>
               </div>
-              <p className="mt-2 text-sm text-fg-muted">{s.d}</p>
             </li>
           ))}
         </ol>
