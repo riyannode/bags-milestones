@@ -192,6 +192,7 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
                   milestone={m}
                   userSnapshotWeight={0n}
                   proofLoading={false}
+                  quorumBps={vault.quorumBps}
                   hasVoted={false}
                   isCreator={Boolean(isCreator)}
                   isVoting={false}
