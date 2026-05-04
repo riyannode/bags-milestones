@@ -5,11 +5,14 @@ import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useBagsMilestones } from "@/lib/useBagsMilestones";
 import { loadVault } from "@/lib/loadVault";
 import { explorerUrl } from "@/lib/anchor";
-import { formatSol, shortAddr } from "@/lib/format";
+import { shortAddr } from "@/lib/format";
 import { EscrowBalance } from "./EscrowBalance";
 import { MilestoneCard } from "./MilestoneCard";
+import { MilestoneTimeline } from "./MilestoneTimeline";
+import { UndepositedRoyaltiesPanel } from "./UndepositedRoyaltiesPanel";
 import type { MilestoneView, VaultView } from "@/types";
 import { getCreatorRoyalties } from "@/lib/bags";
+import { invalidateSnapshot, loadSnapshotMerkle } from "@/lib/snapshot";
 
 interface CreatorDashboardProps {
   tokenId: string;
@@ -128,42 +131,32 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
             </div>
           )}
 
-          {/* Bento: escrow + royalty deposit */}
-          <div className="grid gap-6 lg:grid-cols-3">
-            <div className="lg:col-span-2">
+          {/* Bento: escrow balance + undeposited royalties */}
+          <div className="grid gap-6 lg:grid-cols-5">
+            <div className="lg:col-span-3">
               <EscrowBalance
                 totalLamports={vault.escrowBalance}
                 milestones={milestones}
               />
             </div>
             {isCreator && (
-              <div className="glass relative overflow-hidden rounded-2xl p-5">
-                <div className="bg-dotgrid absolute inset-0 -z-10 opacity-30" />
-                <h3 className="text-[11px] uppercase tracking-[0.2em] text-fg-muted">
-                  Royalties
-                </h3>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="font-mono text-2xl font-semibold text-fg">
-                    {formatSol(pendingRoyalties)}
-                  </span>
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-fg-muted">
-                    pending on Bags
-                  </span>
-                </div>
-                <DepositForm
+              <div className="lg:col-span-2">
+                <UndepositedRoyaltiesPanel
+                  pendingLamports={pendingRoyalties}
+                  escrowedLamports={vault.escrowBalance}
                   busy={busy === "deposit"}
-                  onDeposit={(sol) =>
+                  onDeposit={(lamports) =>
                     wrap("deposit", () =>
-                      depositRoyalty(
-                        tokenId,
-                        Math.floor(sol * LAMPORTS_PER_SOL),
-                      ),
+                      depositRoyalty(tokenId, lamports),
                     )
                   }
                 />
               </div>
             )}
           </div>
+
+          {/* Milestone slot overview — always visible, even for non-creators. */}
+          <MilestoneTimeline milestones={milestones} />
 
           {isCreator && (
             <NewMilestoneForm
@@ -197,7 +190,8 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
                 <MilestoneCard
                   key={m.index}
                   milestone={m}
-                  userTokenBalance={0}
+                  userSnapshotWeight={0n}
+                  proofLoading={false}
                   hasVoted={false}
                   isCreator={Boolean(isCreator)}
                   isVoting={false}
@@ -205,9 +199,26 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
                   isFinalizing={busy === `finalize-${m.index}`}
                   onVote={() => Promise.resolve()}
                   onClaim={(url) =>
-                    wrap(`claim-${m.index}`, () =>
-                      claimMilestone(tokenId, m.index, url),
-                    )
+                    wrap(`claim-${m.index}`, async () => {
+                      // Build the holder snapshot Merkle tree at claim time.
+                      // The root + total supply commit on-chain so holders
+                      // later can verify their voting weight.
+                      const tree = await loadSnapshotMerkle(tokenId);
+                      if (tree.totalSupply <= 0n) {
+                        throw new Error(
+                          "No holders found in snapshot. Cannot claim.",
+                        );
+                      }
+                      const sig = await claimMilestone(
+                        tokenId,
+                        m.index,
+                        url,
+                        tree.root,
+                        tree.totalSupply,
+                      );
+                      invalidateSnapshot(tokenId);
+                      return sig;
+                    })
                   }
                   onFinalize={() =>
                     wrap(`finalize-${m.index}`, () =>
@@ -261,41 +272,9 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
   );
 }
 
-function DepositForm({
-  onDeposit,
-  busy,
-}: {
-  onDeposit: (sol: number) => void;
-  busy: boolean;
-}) {
-  const [v, setV] = useState("0.5");
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        const n = Number(v);
-        if (n > 0) onDeposit(n);
-      }}
-      className="mt-4 flex gap-2"
-    >
-      <input
-        type="number"
-        step="0.01"
-        min="0"
-        value={v}
-        onChange={(e) => setV(e.target.value)}
-        className="w-full rounded-lg border border-border bg-white/[0.02] px-3 py-2 font-mono text-sm text-fg focus:border-primary/40 focus:outline-none"
-      />
-      <button
-        type="submit"
-        disabled={busy}
-        className="btn-primary shrink-0 rounded-lg px-3 py-2 text-sm font-medium"
-      >
-        {busy ? "Depositing…" : "Deposit"}
-      </button>
-    </form>
-  );
-}
+const TITLE_MAX = 64;
+const DESC_MAX = 256;
+const MAX_MILESTONES = 5;
 
 function NewMilestoneForm({
   existingCount,
@@ -318,15 +297,31 @@ function NewMilestoneForm({
   const [amount, setAmount] = useState("");
 
   const nextIndex = existingCount;
-  const disabled = nextIndex >= 5;
+  const disabled = nextIndex >= MAX_MILESTONES;
+
+  const deadlineTs = deadline
+    ? Math.floor(new Date(deadline).getTime() / 1000)
+    : 0;
+  const nowTs = Math.floor(Date.now() / 1000);
+  const deadlineInPast = deadlineTs > 0 && deadlineTs <= nowTs;
+
+  const amountNum = Number(amount);
+  const amountValid = Number.isFinite(amountNum) && amountNum > 0;
+
+  const canSubmit =
+    !disabled &&
+    !busy &&
+    title.trim().length > 0 &&
+    deadlineTs > 0 &&
+    !deadlineInPast &&
+    amountValid;
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (!title || !deadline || !amount) return;
-        const ts = Math.floor(new Date(deadline).getTime() / 1000);
-        onSubmit(nextIndex, title, description, ts, Number(amount));
+        if (!canSubmit) return;
+        onSubmit(nextIndex, title.trim(), description.trim(), deadlineTs, amountNum);
         setTitle("");
         setDescription("");
         setDeadline("");
@@ -335,56 +330,102 @@ function NewMilestoneForm({
       className="glass relative overflow-hidden rounded-2xl p-6"
     >
       <div className="bg-dotgrid absolute inset-0 -z-10 opacity-30" />
-      <div className="flex items-center justify-between">
-        <h3 className="text-[11px] uppercase tracking-[0.2em] text-fg-muted">
-          New milestone · M-{(nextIndex + 1).toString().padStart(2, "0")} / 05
-        </h3>
-        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-primary/80">
-          {disabled ? "max reached" : "ready"}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.2em] text-fg-muted">
+            New milestone · M-{(nextIndex + 1).toString().padStart(2, "0")} / {MAX_MILESTONES.toString().padStart(2, "0")}
+          </div>
+          <h3 className="mt-1 text-lg font-semibold tracking-tight">
+            {disabled
+              ? "All slots committed"
+              : `Slot ${nextIndex + 1} of ${MAX_MILESTONES}`}
+          </h3>
+        </div>
+        <span
+          className="font-mono text-[10px] uppercase tracking-[0.2em]"
+          style={{ color: disabled ? "var(--fg-muted)" : "var(--primary)" }}
+        >
+          {disabled ? "max reached" : canSubmit ? "ready" : "draft"}
         </span>
       </div>
       {disabled ? (
         <p className="mt-3 text-sm text-fg-muted">
-          Maximum of 5 milestones reached.
+          Maximum of {MAX_MILESTONES} milestones reached. To add more, finish
+          the existing roadmap.
         </p>
       ) : (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            maxLength={64}
-            placeholder="Title"
-            className="rounded-lg border border-border bg-white/[0.02] px-3 py-2 text-sm text-fg placeholder:text-fg-muted/60 focus:border-primary/40 focus:outline-none"
-          />
-          <input
-            type="datetime-local"
-            value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
-            className="rounded-lg border border-border bg-white/[0.02] px-3 py-2 font-mono text-sm text-fg focus:border-primary/40 focus:outline-none"
-          />
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            maxLength={256}
-            placeholder="Description"
-            rows={2}
-            className="rounded-lg border border-border bg-white/[0.02] px-3 py-2 text-sm text-fg placeholder:text-fg-muted/60 focus:border-primary/40 focus:outline-none sm:col-span-2"
-          />
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="Amount (SOL)"
-            className="rounded-lg border border-border bg-white/[0.02] px-3 py-2 font-mono text-sm text-fg placeholder:text-fg-muted/60 focus:border-primary/40 focus:outline-none"
-          />
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="sm:col-span-2">
+            <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-fg-muted">
+              <span>Title</span>
+              <span className="font-mono">
+                {title.length}/{TITLE_MAX}
+              </span>
+            </div>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={TITLE_MAX}
+              placeholder="e.g. Ship v1.0 release"
+              className="w-full rounded-lg border border-border bg-white/[0.02] px-3 py-2 text-sm text-fg placeholder:text-fg-muted/60 focus:border-primary/40 focus:outline-none"
+            />
+          </label>
+          <label>
+            <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-fg-muted">
+              <span>Deadline</span>
+              {deadlineInPast && (
+                <span className="font-mono text-destructive">in past</span>
+              )}
+            </div>
+            <input
+              type="datetime-local"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+              className="w-full rounded-lg border border-border bg-white/[0.02] px-3 py-2 font-mono text-sm text-fg focus:border-primary/40 focus:outline-none"
+              style={{
+                borderColor: deadlineInPast
+                  ? "rgba(255,77,77,0.45)"
+                  : undefined,
+              }}
+            />
+          </label>
+          <label>
+            <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-fg-muted">
+              <span>Amount</span>
+              <span className="font-mono">SOL</span>
+            </div>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.50"
+              className="w-full rounded-lg border border-border bg-white/[0.02] px-3 py-2 font-mono text-sm text-fg placeholder:text-fg-muted/60 focus:border-primary/40 focus:outline-none"
+            />
+          </label>
+          <label className="sm:col-span-2">
+            <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-fg-muted">
+              <span>Description</span>
+              <span className="font-mono">
+                {description.length}/{DESC_MAX}
+              </span>
+            </div>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              maxLength={DESC_MAX}
+              placeholder="Acceptance criteria, evidence URL hint, anything holders need to evaluate."
+              rows={3}
+              className="w-full rounded-lg border border-border bg-white/[0.02] px-3 py-2 text-sm text-fg placeholder:text-fg-muted/60 focus:border-primary/40 focus:outline-none"
+            />
+          </label>
           <button
             type="submit"
-            disabled={busy}
-            className="btn-primary rounded-lg px-3 py-2 text-sm font-medium"
+            disabled={!canSubmit}
+            className="btn-primary rounded-lg px-3 py-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 sm:col-span-2"
           >
-            {busy ? "Creating…" : "Add milestone →"}
+            {busy ? "Creating…" : `Commit M-${(nextIndex + 1).toString().padStart(2, "0")} →`}
           </button>
         </div>
       )}

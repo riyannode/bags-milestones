@@ -102,6 +102,88 @@ export async function getHolderBalance(
   }
 }
 
+// -----------------------------------------------------------------
+// Holder snapshot — used by the Merkle voting system.
+// -----------------------------------------------------------------
+
+const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+
+export interface SnapshotHolder {
+  /** Owner wallet (base-58 pubkey). */
+  wallet: string;
+  /** Raw balance in token base units (lamports for the mint). */
+  balance: bigint;
+}
+
+interface RpcKeyedAccount {
+  pubkey: string;
+  account: {
+    data: { parsed: { info: { owner: string; tokenAmount: { amount: string } } } };
+  };
+}
+
+async function fetchTokenAccountsForMint(
+  rpc: string,
+  programId: string,
+  mint: string,
+): Promise<SnapshotHolder[]> {
+  const res = await fetch(rpc, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "getProgramAccounts",
+      params: [
+        programId,
+        {
+          encoding: "jsonParsed",
+          commitment: "confirmed",
+          filters: [
+            // Owner offset for SPL token account layout: 0 (mint) is 32 bytes.
+            { dataSize: 165 },
+            { memcmp: { offset: 0, bytes: mint } },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!res.ok) return [];
+  const json = (await res.json()) as { result?: RpcKeyedAccount[] };
+  const result = json.result ?? [];
+  return result.map((acc) => ({
+    wallet: acc.account.data.parsed.info.owner,
+    balance: BigInt(acc.account.data.parsed.info.tokenAmount.amount),
+  }));
+}
+
+/**
+ * Fetch the current snapshot of token holders for `mint` via Helius RPC.
+ *
+ * Returns one row per token account; the Merkle builder aggregates duplicate
+ * owners and drops zero balances. The RPC commitment is `confirmed`, so the
+ * snapshot is taken at (approximately) the latest confirmed slot — for a
+ * truly slot-pinned read you'd want an archival RPC, which is out of scope
+ * for the v0.2 demo.
+ *
+ * Tries the SPL Token-2022 program as a fallback if the canonical program
+ * returns no holders (some Bags creator tokens are minted on Token-2022).
+ */
+export async function getSnapshotHolders(
+  mint: string,
+): Promise<SnapshotHolder[]> {
+  const rpc = process.env.NEXT_PUBLIC_SOLANA_RPC;
+  if (!rpc) return [];
+  try {
+    const v1 = await fetchTokenAccountsForMint(rpc, TOKEN_PROGRAM_ID, mint);
+    if (v1.length > 0) return v1;
+    return await fetchTokenAccountsForMint(rpc, TOKEN_2022_PROGRAM_ID, mint);
+  } catch {
+    return [];
+  }
+}
+
 export interface HeliusWebhook {
   webhookID: string;
   webhookURL: string;

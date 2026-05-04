@@ -30,6 +30,7 @@ import {
   PROGRAM_ID,
   NETWORK,
 } from "./anchor";
+import { bytesToFixedArray } from "./merkle";
 
 // `SolanaChain` is a literal union — Privy expects values like
 // "solana:101" (mainnet) / "solana:103" (devnet) / "solana:102" (testnet).
@@ -58,12 +59,15 @@ export interface UseBagsMilestonesResult {
     mint: string,
     index: number,
     evidenceUrl: string,
+    snapshotRoot: Uint8Array,
+    snapshotTotalSupply: bigint,
   ) => Promise<string>;
   vote: (
     mint: string,
     index: number,
     approve: boolean,
-    voterTokenAccount: string,
+    claimedWeight: bigint,
+    proof: Uint8Array[],
   ) => Promise<string>;
   finalizeMilestone: (
     mint: string,
@@ -166,13 +170,21 @@ export function useBagsMilestones(): UseBagsMilestonesResult {
     mint: string,
     index: number,
     evidenceUrl: string,
+    snapshotRoot: Uint8Array,
+    snapshotTotalSupply: bigint,
   ) => {
     const { pk } = requireWallet();
     const tokenMint = new PublicKey(mint);
     const vault = findVaultPda(tokenMint);
     const milestone = findMilestonePda(vault, index);
+    const rootArr = bytesToFixedArray(snapshotRoot);
     const tx = await program.methods
-      .claimMilestone(index, evidenceUrl)
+      .claimMilestone(
+        index,
+        evidenceUrl,
+        rootArr,
+        new BN(snapshotTotalSupply.toString()),
+      )
       .accounts({ creator: pk, vault, milestone } as never)
       .transaction();
     return buildSignSend(tx);
@@ -182,25 +194,25 @@ export function useBagsMilestones(): UseBagsMilestonesResult {
     mint: string,
     index: number,
     approve: boolean,
-    voterTokenAccount: string,
+    claimedWeight: bigint,
+    proof: Uint8Array[],
   ) => {
     const { pk } = requireWallet();
     const tokenMint = new PublicKey(mint);
     const vault = findVaultPda(tokenMint);
     const milestone = findMilestonePda(vault, index);
-    // VoteRecord PDA depends on the milestone's current `claim_timestamp`
-    // so a fresh PDA is allocated per claim round (regression fix for
-    // BUG_pr-review-...0002 — see programs/bags-milestones/src/lib.rs).
+    // VoteRecord PDA is seeded by the milestone's `claim_timestamp`, so
+    // each claim round allocates a fresh PDA (re-claim after rejection
+    // re-opens voting cleanly).
     const milestoneAcc = await program.account.milestone.fetch(milestone);
     const voteRecord = findVotePda(milestone, pk, milestoneAcc.claimTimestamp);
+    const proofArr = proof.map(bytesToFixedArray);
     const tx = await program.methods
-      .vote(index, approve)
+      .vote(index, approve, new BN(claimedWeight.toString()), proofArr)
       .accounts({
         voter: pk,
         vault,
         milestone,
-        tokenMint,
-        voterTokenAccount: new PublicKey(voterTokenAccount),
         voteRecord,
       } as never)
       .transaction();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useBagsMilestones } from "@/lib/useBagsMilestones";
 import { loadVault } from "@/lib/loadVault";
 import { explorerUrl } from "@/lib/anchor";
@@ -12,8 +12,8 @@ import type { BagsHolder, MilestoneView, VaultView } from "@/types";
 import { getHolders, getTokenInfo } from "@/lib/bags";
 import { getTokenOverview } from "@/lib/birdeye";
 import { getHolderBalance } from "@/lib/helius";
-import { PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { loadSnapshotMerkle } from "@/lib/snapshot";
+import type { SnapshotMerkle } from "@/lib/merkle";
 
 interface HolderViewProps {
   tokenId: string;
@@ -29,6 +29,8 @@ export function HolderView({ tokenId }: HolderViewProps) {
   const [marketCap, setMarketCap] = useState<number | null>(null);
   const [vol24h, setVol24h] = useState<number | null>(null);
   const [userBalance, setUserBalance] = useState<number>(0);
+  const [snapshotTree, setSnapshotTree] = useState<SnapshotMerkle | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [lastTx, setLastTx] = useState<string | null>(null);
@@ -69,6 +71,39 @@ export function HolderView({ tokenId }: HolderViewProps) {
       cancelled = true;
     };
   }, [walletAddress, tokenId, refreshKey]);
+
+  // Build the snapshot Merkle tree whenever there's at least one claimed
+  // milestone the user might want to vote on. Cached at the lib layer for
+  // 30s so simultaneous renders don't fan out to multiple RPC calls.
+  const hasClaimedMilestone = useMemo(
+    () => milestones.some((m) => m.status === "claimed"),
+    [milestones],
+  );
+  useEffect(() => {
+    if (!hasClaimedMilestone) {
+      setSnapshotTree(null);
+      return;
+    }
+    let cancelled = false;
+    setSnapshotLoading(true);
+    void (async () => {
+      try {
+        const tree = await loadSnapshotMerkle(tokenId);
+        if (!cancelled) setSnapshotTree(tree);
+      } finally {
+        if (!cancelled) setSnapshotLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tokenId, hasClaimedMilestone, refreshKey]);
+
+  const userSnapshotWeight = useMemo<bigint>(() => {
+    if (!walletAddress || !snapshotTree) return 0n;
+    const entry = snapshotTree.entries.find((e) => e.wallet === walletAddress);
+    return entry?.balance ?? 0n;
+  }, [walletAddress, snapshotTree]);
 
   const wrap = async (label: string, fn: () => Promise<string>) => {
     setBusy(label);
@@ -160,7 +195,8 @@ export function HolderView({ tokenId }: HolderViewProps) {
                 <MilestoneCard
                   key={m.index}
                   milestone={m}
-                  userTokenBalance={userBalance}
+                  userSnapshotWeight={userSnapshotWeight}
+                  proofLoading={snapshotLoading}
                   hasVoted={false}
                   isCreator={false}
                   isVoting={busy === `vote-${m.index}`}
@@ -170,11 +206,22 @@ export function HolderView({ tokenId }: HolderViewProps) {
                     wrap(`vote-${m.index}`, async () => {
                       if (!walletAddress)
                         throw new Error("Connect wallet to vote");
-                      const ata = getAssociatedTokenAddressSync(
-                        new PublicKey(tokenId),
-                        new PublicKey(walletAddress),
+                      if (!snapshotTree)
+                        throw new Error(
+                          "Snapshot still loading. Try again in a moment.",
+                        );
+                      const proof = snapshotTree.proof(walletAddress);
+                      if (!proof)
+                        throw new Error(
+                          "You held no tokens at the snapshot slot. Cannot vote.",
+                        );
+                      return vote(
+                        tokenId,
+                        m.index,
+                        approve,
+                        userSnapshotWeight,
+                        proof,
                       );
-                      return vote(tokenId, m.index, approve, ata.toBase58());
                     })
                   }
                   onClaim={() => Promise.resolve()}
