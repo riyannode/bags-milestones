@@ -153,9 +153,35 @@ body {
   }
 }
 
+/* Headline neon — multi-layer text-shadow stack so the glow has depth without
+ * looking like a single uniform haze. Tier'd from sharp (12px) to wide (60px). */
+.text-glow-primary {
+  text-shadow:
+    0 0 12px rgba(157, 255, 61, 0.55),
+    0 0 32px rgba(157, 255, 61, 0.35),
+    0 0 60px rgba(157, 255, 61, 0.18);
+}
+
+/* Breathing pulse for an "in-flight" status indicator (e.g. a milestone
+ * currently in its 72h voting window). Stays subtle — opacity only,
+ * no scale or shadow churn so it never distracts. */
+.pulse-active {
+  animation: pulseActive 2.4s ease-in-out infinite;
+}
+@keyframes pulseActive {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-twinkle,
   .animate-pulse-glow,
+  .pulse-active,
   .caret::after {
     animation: none !important;
   }

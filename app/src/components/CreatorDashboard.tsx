@@ -91,7 +91,7 @@ export function CreatorDashboard({ tokenId }: CreatorDashboardProps) {
               <span className="h-1.5 w-1.5 rounded-full bg-primary shadow-glow-soft" />
               Creator dashboard
             </div>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+            <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">
               Manage milestones
             </h1>
             <p className="font-mono text-xs text-fg-muted">
