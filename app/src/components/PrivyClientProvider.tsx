@@ -2,7 +2,13 @@
 
 /**
  * Privy provider — official Bags partner. Configures Solana embedded wallets
- * + external connectors (Phantom, Backpack, etc.) for the entire app.
+ * + external connectors for the entire app.
+ *
+ * Wallet UX is Solana-first: Phantom / Backpack / Solflare are pinned to the
+ * top of the connect modal, then any other Wallet Standard adapter Privy
+ * detects locally, then WalletConnect (QR) for mobile wallets. Email login
+ * is kept as a fallback so non-crypto-native users can still onboard via
+ * Privy embedded wallet.
  */
 
 import { PrivyProvider } from "@privy-io/react-auth";
@@ -27,10 +33,19 @@ export function PrivyClientProvider({ children }: { children: ReactNode }) {
       config={{
         appearance: {
           theme: "dark",
-          accentColor: "#a855f7",
+          accentColor: "#9dff3d",
           logo: undefined,
           walletChainType: "solana-only",
+          showWalletLoginFirst: true,
+          walletList: [
+            "phantom",
+            "backpack",
+            "solflare",
+            "detected_solana_wallets",
+            "wallet_connect_qr_solana",
+          ],
         },
+        loginMethods: ["wallet", "email"],
         externalWallets: {
           solana: { connectors: toSolanaWalletConnectors() },
         },

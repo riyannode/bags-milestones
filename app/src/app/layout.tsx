@@ -17,10 +17,31 @@ const jetbrains = JetBrains_Mono({
   variable: "--font-jetbrains",
 });
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://bags-milestones.vercel.app";
+
 export const metadata: Metadata = {
-  title: "Bags Milestones — Bagscrow · Lock royalties. Vote milestones.",
+  metadataBase: new URL(SITE_URL),
+  title: "Bags Milestones — Building real trust between Bags creators and holders",
   description:
-    "Lock royalties. Vote milestones. Build trust. Bagscrow gives Bags creator tokens an on-chain accountability layer — escrow + holder governance.",
+    "Bagscrow gives Bags creator tokens an on-chain accountability layer. Creators commit milestones, holders vote on royalty releases, escrow keeps both sides honest.",
+  icons: {
+    icon: "/logo.svg",
+    shortcut: "/logo.svg",
+    apple: "/logo.svg",
+  },
+  openGraph: {
+    title: "Bags Milestones — Building real trust between Bags creators and holders",
+    description:
+      "Creators commit milestones. Holders vote on royalty releases. On-chain escrow with Merkle-snapshot voting keeps both sides honest.",
+    images: ["/logo.svg"],
+  },
+  twitter: {
+    card: "summary",
+    title: "Bags Milestones",
+    description:
+      "Creators commit milestones. Holders vote on royalty releases. Snapshot-locked, on-chain.",
+    images: ["/logo.svg"],
+  },
 };
 
 export default function RootLayout({
