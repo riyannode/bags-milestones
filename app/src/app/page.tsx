@@ -56,24 +56,29 @@ export default function LandingPage() {
       </header>
 
       <section className="mt-20 text-center sm:mt-28">
-        <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.2em] text-primary shadow-glow-soft">
+        <div className="flex justify-center">
+          <Logo size="lg" />
+        </div>
+
+        <div className="mx-auto mt-10 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.2em] text-primary shadow-glow-soft">
           <span className="h-1.5 w-1.5 animate-twinkle rounded-full bg-primary" />
           On-chain accountability for Bags creator tokens
         </div>
 
         <h1 className="mt-6 text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-6xl md:text-7xl">
-          From speculation to{" "}
+          Building{" "}
           <span className="text-primary [text-shadow:0_0_30px_rgba(157,255,61,0.45)]">
-            accountable
+            real trust
           </span>
-          <br className="hidden sm:block" /> creator crowdfunding.
+          <br className="hidden sm:block" /> between Bags creators and holders.
         </h1>
 
         <p className="mx-auto mt-6 max-w-2xl text-balance text-base text-fg-muted">
-          <span className="font-mono text-primary">Bagscrow</span> turns Bags.fm
-          royalties into milestone-gated funding. Royalties lock in a
-          program-owned escrow. Holders vote on releases with weight pinned to
-          a snapshot — last-minute buys can&rsquo;t sway the result.
+          Creators commit milestones. Holders vote on royalty releases. An
+          on-chain escrow with{" "}
+          <span className="font-mono text-primary">Merkle-snapshot voting</span>{" "}
+          keeps both sides honest — no last-minute whales, no off-chain
+          promises.
         </p>
 
         <div className="mt-10">
@@ -91,17 +96,37 @@ export default function LandingPage() {
             href="/creator"
             className="btn-primary inline-flex items-center gap-2 rounded-lg px-4 py-2 font-medium"
           >
-            Set up Milestones
+            Launch a vault
             <span aria-hidden>→</span>
           </Link>
         </div>
 
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[11px] uppercase tracking-[0.2em] text-fg-muted">
-          <span>Solana · Devnet live</span>
-          <span className="text-fg-muted/40">·</span>
-          <span>Merkle-snapshot voting</span>
-          <span className="text-fg-muted/40">·</span>
-          <span>16 / 16 tests passing</span>
+        <div className="mt-10 flex flex-col items-center gap-y-2 text-[11px] uppercase tracking-[0.2em] text-fg-muted">
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2">
+            <span>Snapshot voting</span>
+            <span className="text-fg-muted/40">·</span>
+            <span>5% quorum</span>
+            <span className="text-fg-muted/40">·</span>
+            <span>72h windows</span>
+            <span className="text-fg-muted/40">·</span>
+            <span>Devnet</span>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2">
+            <span>Anchor</span>
+            <span className="text-fg-muted/40">·</span>
+            <span>Helius</span>
+            <span className="text-fg-muted/40">·</span>
+            <span>Birdeye</span>
+            <span className="text-fg-muted/40">·</span>
+            <span>Privy</span>
+            <span className="text-fg-muted/40">·</span>
+            <span>Open source</span>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-fg-muted/70">
+            <span>Built for The Bags Hackathon</span>
+            <span className="text-fg-muted/40">·</span>
+            <span>Solana devnet</span>
+          </div>
         </div>
       </section>
 
